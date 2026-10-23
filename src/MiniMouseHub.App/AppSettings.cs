@@ -16,6 +16,9 @@ public class AppSettings
     public bool AutoUpdate { get; set; } = true;
     public ThemeChoice Theme { get; set; } = ThemeChoice.System;
 
+    /// <summary>Draw the battery level as the tray icon; when off, the tray shows the app icon.</summary>
+    public bool TrayShowsBattery { get; set; } = true;
+
     /// <summary>GitHub sign-in for syncing settings. Stays on this PC and is never uploaded.</summary>
     public GitHubAccount? GitHub { get; set; }
 

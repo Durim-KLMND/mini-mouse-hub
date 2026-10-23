@@ -375,7 +375,7 @@ internal sealed class LightingCard
     private readonly DeviceMonitor _monitor;
     private DeviceState _device;
     private readonly CheckBox _on = new() { Content = "Lights on" };
-    private readonly ComboBox _effect = new() { Margin = new Thickness(0, 4, 0, 0), Padding = new Thickness(8, 5, 8, 5) };
+    private readonly ComboBox _effect = new() { Margin = new Thickness(0, 4, 0, 0) };
     private readonly Slider _brightness = NewSlider();
     private readonly Slider _speed = NewSlider();
     private readonly Slider _hue = NewSlider();
@@ -551,6 +551,10 @@ internal static class SettingsPage
             };
             appearance.Children.Add(option);
         }
+        var trayBattery = Toggle("Show the battery level in the tray icon", settings.TrayShowsBattery, on => { settings.TrayShowsBattery = on; settings.Save(); });
+        trayBattery.Margin = new Thickness(0, 14, 0, 0);
+        appearance.Children.Add(trayBattery);
+        appearance.Children.Add(Ui.Text("When this is off, the tray shows the Mini mouse hub icon. Hover it to see the battery.", 12, "Muted"));
         panel.Children.Add(Ui.Card(appearance));
 
         var notifications = new StackPanel();
