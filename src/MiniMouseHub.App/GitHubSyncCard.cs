@@ -80,6 +80,44 @@ internal sealed class GitHubSyncCard
     {
         _signIn?.Cancel();
         var signIn = _signIn = new CancellationTokenSource();
+        if (GitHubSync.CanSignInWithBrowser)
+            await SignInWithBrowser(signIn);
+        else
+            await SignInWithCode(signIn);
+    }
+
+    private async Task SignInWithBrowser(CancellationTokenSource signIn)
+    {
+        ShowWaiting("Finish signing in on the GitHub page that just opened in your browser.");
+        try
+        {
+            signIn.CancelAfter(TimeSpan.FromMinutes(10));
+            await SignedIn(await _sync.GitHub.SignInWithBrowserAsync(signIn.Token));
+        }
+        catch (OperationCanceledException) when (signIn.IsCancellationRequested)
+        {
+            if (_signIn == signIn) _signIn = null;
+            if (Root.IsLoaded) Render();
+        }
+        catch (Exception ex)
+        {
+            _signIn = null;
+            Render($"Sign-in failed: {ex.Message}");
+        }
+    }
+
+    private async Task SignedIn(GitHubAccount account)
+    {
+        _settings.GitHub = account;
+        _settings.Save();
+        _signIn = null;
+        Render();
+        await _sync.SyncAsync();
+    }
+
+    /// <summary>Device flow, for builds without the client secret: the user pastes a code on GitHub.</summary>
+    private async Task SignInWithCode(CancellationTokenSource signIn)
+    {
         GitHubSync.DeviceCode device;
         try { device = await _sync.GitHub.StartSignInAsync(); }
         catch (Exception ex)
@@ -93,11 +131,7 @@ internal sealed class GitHubSyncCard
         ShowCode(device);
         try
         {
-            _settings.GitHub = await _sync.GitHub.FinishSignInAsync(device, signIn.Token);
-            _settings.Save();
-            _signIn = null;
-            Render();
-            await _sync.SyncAsync();
+            await SignedIn(await _sync.GitHub.FinishSignInAsync(device, signIn.Token));
         }
         catch (OperationCanceledException) when (signIn.IsCancellationRequested)
         {
@@ -142,6 +176,16 @@ internal sealed class GitHubSyncCard
         var waiting = Ui.Text("Waiting for GitHub…", 12, "Muted");
         waiting.Margin = new Thickness(0, 8, 0, 0);
         _content.Children.Add(waiting);
+    }
+
+    private void ShowWaiting(string text)
+    {
+        _content.Children.Clear();
+        _content.Children.Add(Ui.Label("SYNC WITH GITHUB"));
+        _content.Children.Add(Ui.Text(text, 13, "Muted"));
+        var cancel = new Button { Content = "Cancel" };
+        cancel.Click += (_, _) => _signIn?.Cancel();
+        _content.Children.Add(Row(cancel));
     }
 
     private static Button PrimaryButton(string text) => new()

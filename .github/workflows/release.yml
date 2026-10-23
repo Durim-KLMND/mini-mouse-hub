@@ -32,7 +32,7 @@ jobs:
         run: dotnet test
 
       - name: Publish
-        run: dotnet publish src/MiniMouseHub.App -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:DebugType=none -p:Version=${{ env.VERSION }} -o publish
+        run: dotnet publish src/MiniMouseHub.App -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:DebugType=none -p:Version=${{ env.VERSION }} -p:GitHubClientSecret=${{ secrets.MMH_GITHUB_CLIENT_SECRET }} -o publish
 
       - name: Create release
         env:
