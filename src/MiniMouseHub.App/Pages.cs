@@ -143,6 +143,7 @@ internal static class HomePage
             row.Children.Add(pct);
             info.Children.Add(row);
         }
+        content.Children.Add(info);
 
         var tile = new Button { Style = (Style)Application.Current.Resources["Tile"], Content = content };
         tile.Click += (_, _) => open(device);
