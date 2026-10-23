@@ -3,77 +3,57 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Mini Mouse Hub"
         Icon="Assets/app.ico"
-        Width="400" SizeToContent="Height" ResizeMode="CanMinimize"
+        Width="780" Height="560" MinWidth="520" MinHeight="420"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource Background}"
         Foreground="{StaticResource Text}"
         FontFamily="Segoe UI" FontSize="14">
-    <StackPanel Margin="20">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="44" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
 
-        <!-- Device header -->
-        <Grid Margin="0,0,0,16">
+    <Grid x:Name="Root">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="44" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="52" />
+        </Grid.RowDefinitions>
+
+        <!-- Title bar -->
+        <Grid Background="#111317">
             <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <StackPanel>
-                <TextBlock x:Name="DeviceName" Text="Looking for your mouse…" FontSize="20" FontWeight="SemiBold" />
-                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                    <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="{StaticResource Muted}" Margin="0,0,6,0" VerticalAlignment="Center" />
-                    <TextBlock x:Name="StatusText" Text="Searching" Foreground="{StaticResource Muted}" FontSize="12" />
-                </StackPanel>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Button x:Name="BackButton" Content="&#xE72B;" Style="{StaticResource ChromeButton}" FontSize="13"
+                        Height="44" Click="Back_Click" Visibility="Collapsed" ToolTip="Back" />
+                <Image Source="Assets/app.ico" Width="18" Height="18" Margin="14,0,10,0" />
+                <TextBlock x:Name="TitleText" Text="Mini Mouse Hub" FontSize="13" VerticalAlignment="Center" />
             </StackPanel>
-            <Button x:Name="RefreshButton" Grid.Column="1" Content="Refresh" Click="Refresh_Click"
-                    Background="{StaticResource Surface}" VerticalAlignment="Center" />
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button Content="&#xE72C;" Style="{StaticResource ChromeButton}" Click="Refresh_Click" ToolTip="Look for devices again" />
+                <Button Content="&#xE921;" Style="{StaticResource ChromeButton}" Click="Minimize_Click" ToolTip="Minimize" />
+                <Button Content="&#xE8BB;" Style="{StaticResource CloseButton}" Click="Close_Click" ToolTip="Close to the tray" />
+            </StackPanel>
         </Grid>
 
-        <!-- Battery -->
-        <Border Style="{StaticResource Card}">
-            <StackPanel>
-                <TextBlock Text="BATTERY" Style="{StaticResource Label}" />
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="BatteryPercent" Text="–" FontSize="36" FontWeight="SemiBold" />
-                    <TextBlock x:Name="ChargingText" Grid.Column="1" Text="" Foreground="{StaticResource Muted}"
-                               VerticalAlignment="Center" HorizontalAlignment="Right" />
-                </Grid>
-                <Border Height="8" CornerRadius="4" Background="{StaticResource Border}" Margin="0,10,0,0">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition x:Name="BatteryFilled" Width="0*" />
-                            <ColumnDefinition x:Name="BatteryEmpty" Width="100*" />
-                        </Grid.ColumnDefinitions>
-                        <Border x:Name="BatteryBar" CornerRadius="4" Background="{StaticResource Good}" />
-                    </Grid>
-                </Border>
-            </StackPanel>
-        </Border>
+        <!-- Page -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <ContentControl x:Name="Page" Margin="24,20,24,8" />
+        </ScrollViewer>
 
-        <!-- DPI -->
-        <Border Style="{StaticResource Card}">
-            <StackPanel>
-                <TextBlock Text="DPI" Style="{StaticResource Label}" />
-                <TextBlock x:Name="DpiValue" Text="–" FontSize="36" FontWeight="SemiBold" />
-                <TextBlock x:Name="DpiSlotsLabel" Text="DPI button cycles through" Style="{StaticResource Label}" Margin="0,12,0,6" Visibility="Collapsed" />
-                <WrapPanel x:Name="DpiSlots" />
-                <TextBlock Text="Set the current DPI" Style="{StaticResource Label}" Margin="0,14,0,6" />
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBox x:Name="DpiInput" Padding="8,6" Background="{StaticResource Background}" Foreground="{StaticResource Text}"
-                             BorderBrush="{StaticResource Border}" CaretBrush="{StaticResource Text}" KeyDown="DpiInput_KeyDown" />
-                    <Button x:Name="ApplyDpi" Grid.Column="1" Content="Apply" Margin="8,0,0,0" Click="ApplyDpi_Click" />
-                </Grid>
-                <TextBlock x:Name="DpiHint" Text="" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap" />
-            </StackPanel>
-        </Border>
-
-        <TextBlock Text="Closing this window keeps Mini Mouse Hub running in the system tray."
-                   Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" />
-    </StackPanel>
+        <!-- Bottom bar -->
+        <Grid Grid.Row="2" Background="#111317">
+            <Button Style="{StaticResource FlatButton}" HorizontalAlignment="Left" Margin="12,0,0,0" Click="Settings_Click">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE713;" FontFamily="{StaticResource Icons}" FontSize="15" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <TextBlock Text="Settings" VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
+            <TextBlock x:Name="FooterText" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,20,0"
+                       Foreground="{StaticResource Muted}" FontSize="12" />
+        </Grid>
+    </Grid>
 </Window>

@@ -9,14 +9,28 @@ namespace MiniMouseHub.App;
 
 public partial class MainWindow : Window
 {
-    private readonly MouseMonitor _monitor;
-    private MouseState _state = MouseState.NoReceiver;
+    private enum PageKind { Home, Device, Settings }
+
+    private readonly DeviceMonitor _monitor;
+    private readonly AppSettings _settings;
+    private readonly Func<Task<string>> _checkForUpdates;
+    private IReadOnlyList<DeviceState> _devices = [];
+    private bool _firstScanDone;
     private bool _allowClose;
 
-    public MainWindow(MouseMonitor monitor)
+    private PageKind _page = PageKind.Home;
+    private string? _deviceId;
+    private DevicePage? _devicePage;
+
+    public MainWindow(DeviceMonitor monitor, AppSettings settings, Func<Task<string>> checkForUpdates)
     {
         _monitor = monitor;
+        _settings = settings;
+        _checkForUpdates = checkForUpdates;
         InitializeComponent();
+        FooterText.Text = $"Version {Updater.CurrentVersion}";
+        StateChanged += (_, _) => Root.Margin = WindowState == WindowState.Maximized ? new Thickness(7) : new Thickness(0);
+        ShowHome();
     }
 
     /// <summary>Lets the next Close() really close the window instead of hiding it.</summary>
@@ -32,114 +46,67 @@ public partial class MainWindow : Window
         base.OnClosing(e);
     }
 
-    public void Render(MouseState state)
+    public void Render(IReadOnlyList<DeviceState> devices, bool firstScanDone)
     {
-        _state = state;
-
-        DeviceName.Text = state.Name ?? (state.ReceiverFound ? "Mouse not responding" : "No receiver found");
-        var (status, color) = state switch
+        _devices = devices;
+        _firstScanDone = firstScanDone;
+        switch (_page)
         {
-            { ReceiverFound: false } => ("Plug in the Lightspeed receiver, and make sure G HUB is closed", "Bad"),
-            { MouseAwake: false } => ("Asleep or switched off. Move the mouse to wake it", "Warn"),
-            _ => ("Connected", "Good"),
-        };
-        StatusText.Text = status;
-        StatusDot.Fill = Brush(color);
-
-        if (state.Battery is { } battery)
-        {
-            BatteryPercent.Text = battery.Percent is { } p ? $"{p}%" : battery.Level.ToString();
-            ChargingText.Text = battery.Charging switch
-            {
-                ChargingState.Charging => "Charging",
-                ChargingState.ChargingSlow => "Charging slowly",
-                ChargingState.Full => "Fully charged",
-                ChargingState.NotCharging => "Plugged in, not charging",
-                ChargingState.Error => "Charging error",
-                _ => "On battery",
-            };
-            SetBatteryBar(battery.Percent ?? 0);
-            BatteryBar.Background = Brush(battery.Percent switch { <= 10 => "Bad", <= 20 => "Warn", _ => "Good" });
-        }
-        else
-        {
-            BatteryPercent.Text = "–";
-            ChargingText.Text = "";
-            SetBatteryBar(0);
-        }
-
-        DpiValue.Text = state.Dpi?.ToString() ?? "–";
-        DpiSlots.Children.Clear();
-        DpiSlotsLabel.Visibility = state.DpiSlots is { Count: > 0 } ? Visibility.Visible : Visibility.Collapsed;
-        if (state.DpiSlots != null)
-        {
-            for (var i = 0; i < state.DpiSlots.Count; i++)
-            {
-                var active = i == state.ActiveDpiSlot;
-                DpiSlots.Children.Add(new Border
-                {
-                    CornerRadius = new CornerRadius(12),
-                    Padding = new Thickness(10, 3, 10, 3),
-                    Margin = new Thickness(0, 0, 6, 6),
-                    Background = active ? Brush("Accent") : Brush("Border"),
-                    Child = new TextBlock { Text = state.DpiSlots[i].ToString(), Foreground = active ? Brushes.White : Brush("Text"), FontSize = 13 },
-                });
-            }
-        }
-
-        var canSet = state.MouseAwake && state.Dpi != null;
-        ApplyDpi.IsEnabled = canSet;
-        if (state.DpiCapabilities is { } caps)
-        {
-            var where = state.Mode == OnboardMode.Onboard ? "Saved to the highlighted slot on the mouse" : "Applied live";
-            DpiHint.Text = $"{caps.Min}-{caps.Max}. {where}.";
+            case PageKind.Home:
+                ShowHome();
+                break;
+            case PageKind.Device:
+                var device = devices.FirstOrDefault(d => d.Id == _deviceId);
+                if (device == null)
+                    ShowHome(); // unplugged
+                else
+                    _devicePage?.Update(device);
+                break;
         }
     }
 
-    private void SetBatteryBar(int percent)
+    // ---- Navigation ----
+
+    private void ShowHome()
     {
-        percent = Math.Clamp(percent, 0, 100);
-        BatteryFilled.Width = new GridLength(percent, GridUnitType.Star);
-        BatteryEmpty.Width = new GridLength(100 - percent, GridUnitType.Star);
+        _page = PageKind.Home;
+        _devicePage = null;
+        BackButton.Visibility = Visibility.Collapsed;
+        TitleText.Text = "Mini Mouse Hub";
+        Page.Content = HomePage.Build(_devices, _firstScanDone, ShowDevice);
     }
 
+    private void ShowDevice(DeviceState device)
+    {
+        _page = PageKind.Device;
+        _deviceId = device.Id;
+        BackButton.Visibility = Visibility.Visible;
+        TitleText.Text = device.Name;
+        _devicePage = new DevicePage(_monitor, device);
+        Page.Content = _devicePage.Root;
+    }
+
+    private void ShowSettings()
+    {
+        _page = PageKind.Settings;
+        _devicePage = null;
+        BackButton.Visibility = Visibility.Visible;
+        TitleText.Text = "Settings";
+        Page.Content = SettingsPage.Build(_settings, _checkForUpdates);
+    }
+
+    private void Back_Click(object sender, RoutedEventArgs e) => ShowHome();
+    private void Settings_Click(object sender, RoutedEventArgs e) => ShowSettings();
     private void Refresh_Click(object sender, RoutedEventArgs e) => _monitor.Refresh();
+    private void Minimize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+    private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
-    private void DpiInput_KeyDown(object sender, KeyEventArgs e)
+    protected override void OnMouseDown(MouseButtonEventArgs e)
     {
-        if (e.Key == Key.Enter)
-            ApplyDpi_Click(sender, e);
+        base.OnMouseDown(e);
+        if (e.ChangedButton == MouseButton.XButton1 && _page != PageKind.Home)
+            ShowHome(); // mouse back button
     }
 
-    private async void ApplyDpi_Click(object sender, RoutedEventArgs e)
-    {
-        if (!int.TryParse(DpiInput.Text.Trim(), out var dpi))
-        {
-            DpiHint.Text = "Type a number, for example 1600.";
-            return;
-        }
-        if (_state.DpiCapabilities is { } caps && !caps.Accepts(dpi))
-        {
-            DpiHint.Text = $"{dpi} isn't supported. Pick a value from {caps.Min} to {caps.Max}; above 1000 it goes in larger steps, such as 1600 or 1650.";
-            return;
-        }
-
-        ApplyDpi.IsEnabled = false;
-        DpiHint.Text = "Saving…";
-        try
-        {
-            await _monitor.SetDpiAsync(dpi);
-            DpiInput.Clear();
-        }
-        catch (Exception ex)
-        {
-            DpiHint.Text = $"Couldn't change the DPI: {ex.Message}";
-        }
-        finally
-        {
-            ApplyDpi.IsEnabled = true;
-        }
-    }
-
-    private static Brush Brush(string key) => (Brush)Application.Current.Resources[key];
+    internal static Brush Res(string key) => (Brush)Application.Current.Resources[key];
 }

@@ -5,46 +5,130 @@ namespace MiniMouseHub.App;
 
 public partial class App : Application
 {
+    private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(4);
+
     private Mutex? _singleInstance;
-    private MouseMonitor? _monitor;
+    private DeviceMonitor? _monitor;
     private TrayIcon? _tray;
     private MainWindow? _window;
-    private readonly LowBatteryAlert _lowBattery = new(20, 10, 5);
+    private readonly AppSettings _settings = AppSettings.Load();
+    private readonly Updater _updater = new();
+    private readonly Dictionary<string, LowBatteryAlert> _lowBattery = new();
+    private System.Windows.Threading.DispatcherTimer? _updateTimer;
+    private bool _firstScanDone;
+    private bool _installingUpdate;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        var justUpdated = e.Args.Contains("--updated");
 
-        _singleInstance = new Mutex(true, "MiniMouseHub.SingleInstance", out var isFirst);
+        // After an update the previous copy may still be closing, so wait for it.
+        _singleInstance = new Mutex(false, "MiniMouseHub.SingleInstance");
+        bool isFirst;
+        try { isFirst = _singleInstance.WaitOne(justUpdated ? TimeSpan.FromSeconds(15) : TimeSpan.Zero); }
+        catch (AbandonedMutexException) { isFirst = true; }
         if (!isFirst)
         {
             MessageBox.Show("Mini Mouse Hub is already running. Look for it in the system tray.", "Mini Mouse Hub");
+            _singleInstance = null;
             Shutdown();
             return;
         }
 
-        _monitor = new MouseMonitor();
-        _window = new MainWindow(_monitor);
+        Task.Run(Updater.CleanUpOldVersion);
+        StartWithWindows.RefreshPath();
+
+        _monitor = new DeviceMonitor();
+        _window = new MainWindow(_monitor, _settings, CheckForUpdatesFromSettings);
         _tray = new TrayIcon(ShowWindow, Quit);
 
-        _monitor.StateChanged += state => Dispatcher.BeginInvoke(() => OnStateChanged(state));
-        _monitor.DpiChangedOnDevice += (before, after) => Dispatcher.BeginInvoke(() =>
-            _tray.Notify("DPI changed", $"{before} → {after} DPI"));
+        _monitor.DevicesChanged += devices => Dispatcher.BeginInvoke(() => OnDevicesChanged(devices));
+        _monitor.FirstScanCompleted += () => Dispatcher.BeginInvoke(() =>
+        {
+            _firstScanDone = true;
+            OnDevicesChanged(_monitor.Devices);
+        });
+        _monitor.DpiChangedOnDevice += (device, before, after) => Dispatcher.BeginInvoke(() =>
+        {
+            if (_settings.DpiNotifications)
+                _tray.Notify($"{device.Name}: DPI changed", $"{before} → {after} DPI");
+        });
 
-        var startHidden = e.Args.Contains("--minimized");
-        if (!startHidden)
+        if (!e.Args.Contains("--minimized"))
             ShowWindow();
+        if (justUpdated)
+            _tray.Notify("Mini Mouse Hub updated", $"You're now on version {Updater.CurrentVersion}.");
         _monitor.Start();
+
+        _updateTimer = new System.Windows.Threading.DispatcherTimer { Interval = UpdateCheckInterval };
+        _updateTimer.Tick += async (_, _) => await AutoUpdate();
+        _updateTimer.Start();
+        Dispatcher.BeginInvoke(async () => await AutoUpdate());
     }
 
-    private void OnStateChanged(MouseState state)
+    private void OnDevicesChanged(IReadOnlyList<DeviceState> devices)
     {
-        _window?.Render(state);
-        _tray?.Update(state);
+        _window?.Render(devices, _firstScanDone);
+        _tray?.Update(devices);
 
-        if (state.Battery is { } battery && _lowBattery.Check(battery) is { } threshold)
-            _tray?.Notify("Mouse battery low", $"{state.Name ?? "Your mouse"} is at {battery.Percent}%. Time to charge it soon.", warning: threshold <= 10);
+        foreach (var device in devices)
+        {
+            if (device.Battery is not { } battery) continue;
+            if (!_lowBattery.TryGetValue(device.Id, out var alert))
+                _lowBattery[device.Id] = alert = new LowBatteryAlert(20, 10, 5);
+            if (alert.Check(battery) is { } threshold && _settings.LowBatteryNotifications)
+                _tray?.Notify($"{device.Name}: battery low", $"{battery.Percent}% left. Time to charge it soon.", warning: threshold <= 10);
+        }
     }
+
+    // ---- Updates ----
+
+    private async Task AutoUpdate()
+    {
+        if (!_settings.AutoUpdate || _installingUpdate) return;
+        try
+        {
+            var release = await _updater.CheckAsync();
+            if (release != null)
+                await Install(release);
+        }
+        catch (Exception)
+        {
+            // Offline or GitHub unavailable; try again at the next check.
+        }
+    }
+
+    private async Task<string> CheckForUpdatesFromSettings()
+    {
+        var release = await _updater.CheckAsync();
+        if (release == null)
+            return $"You're up to date (version {Updater.CurrentVersion}).";
+        await Install(release);
+        return $"Installing version {release.Version}…";
+    }
+
+    private async Task Install(Updater.Release release)
+    {
+        if (_installingUpdate) return;
+        _installingUpdate = true;
+        try
+        {
+            var windowHidden = _window?.IsVisible != true;
+            _singleInstance?.ReleaseMutex();
+            _singleInstance?.Dispose();
+            _singleInstance = null;
+            await _updater.InstallAsync(release, startMinimized: windowHidden);
+            Quit();
+        }
+        catch (Exception)
+        {
+            _installingUpdate = false;
+            throw;
+        }
+    }
+
+    // ---- Window and exit ----
 
     private void ShowWindow()
     {
@@ -68,6 +152,7 @@ public partial class App : Application
     {
         _tray?.Dispose();
         _monitor?.Dispose();
+        try { _singleInstance?.ReleaseMutex(); } catch (ApplicationException) { }
         _singleInstance?.Dispose();
         base.OnExit(e);
     }

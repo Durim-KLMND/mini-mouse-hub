@@ -35,18 +35,19 @@ public sealed class TrayIcon : IDisposable
         SetIcon(null, false);
     }
 
-    public void Update(MouseState state)
+    /// <summary>Shows the battery of the first mouse (or else the first device with a battery) and lists all devices in the tooltip.</summary>
+    public void Update(IReadOnlyList<DeviceState> devices)
     {
-        var percent = state.MouseAwake ? state.Battery?.Percent : null;
-        var charging = state.Battery?.IsCharging == true;
-        SetIcon(percent, charging);
+        var main = devices.Where(d => d.Battery != null).OrderBy(d => d.Kind == DeviceKind.Mouse ? 0 : 1).FirstOrDefault();
+        var percent = main is { Awake: true } ? main.Battery?.Percent : null;
+        SetIcon(percent, main?.Battery?.IsCharging == true);
 
-        var tooltip = state switch
-        {
-            { ReceiverFound: false } => "Mini Mouse Hub: no receiver",
-            { MouseAwake: false } => $"{state.Name ?? "Mouse"}: asleep",
-            _ => $"{state.Name}: {(percent is { } p ? $"{p}%" : "battery unknown")}{(charging ? ", charging" : "")}, {state.Dpi} DPI",
-        };
+        var lines = devices.Count == 0
+            ? ["No devices found"]
+            : devices.Select(d => d.Awake
+                ? $"{d.Name}: {(d.Battery?.Percent is { } p ? $"{p}%" : "connected")}{(d.Battery?.IsCharging == true ? " (charging)" : "")}"
+                : $"{d.Name}: asleep");
+        var tooltip = string.Join("\n", lines);
         _icon.Text = tooltip.Length > 63 ? tooltip[..63] : tooltip; // Windows limit
     }
 
