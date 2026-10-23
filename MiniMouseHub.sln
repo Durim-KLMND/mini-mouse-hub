@@ -9,6 +9,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniMouseHub.Cli", "src\Min
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniMouseHub.Core", "src\MiniMouseHub.Core\MiniMouseHub.Core.csproj", "{463973CE-A586-406F-AC92-BCE83C730C78}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{C45B24B8-6F65-4878-892D-493D03D27FFB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniMouseHub.Tests", "tests\MiniMouseHub.Tests\MiniMouseHub.Tests.csproj", "{47DC6477-FC1F-4221-A6BE-21B84A667189}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,9 +30,14 @@ Global
 		{463973CE-A586-406F-AC92-BCE83C730C78}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{463973CE-A586-406F-AC92-BCE83C730C78}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{463973CE-A586-406F-AC92-BCE83C730C78}.Release|Any CPU.Build.0 = Release|Any CPU
+		{47DC6477-FC1F-4221-A6BE-21B84A667189}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{47DC6477-FC1F-4221-A6BE-21B84A667189}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{47DC6477-FC1F-4221-A6BE-21B84A667189}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{47DC6477-FC1F-4221-A6BE-21B84A667189}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{9DE7ABD0-3717-4121-B151-49492E9F93C7} = {5F77E9E7-9A7B-41C9-B032-1FAFE90E26F0}
 		{463973CE-A586-406F-AC92-BCE83C730C78} = {5F77E9E7-9A7B-41C9-B032-1FAFE90E26F0}
+		{47DC6477-FC1F-4221-A6BE-21B84A667189} = {C45B24B8-6F65-4878-892D-493D03D27FFB}
 	EndGlobalSection
 EndGlobal
