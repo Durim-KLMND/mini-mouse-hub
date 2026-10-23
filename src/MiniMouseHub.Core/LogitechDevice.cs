@@ -236,12 +236,16 @@ public sealed class LogitechDevice
         var values = new List<int>();
         if (HasFeature(FeatureId.ExtendedAdjustableDpi))
         {
-            // 0x2202 function 2 = getSensorDpiRanges(sensor, direction, page) -> [sensor, direction, page, values...].
-            // The list can span several pages and ends with a 0 value.
+            // 0x2202 function 2 = getSensorDpiRanges(sensor, direction, page) -> [sensor, direction, page, data...].
+            // The data is a byte stream that continues across pages (a value can be split between two pages)
+            // and ends with a 0 value.
+            var data = new List<byte>();
             for (byte page = 0; page < 16; page++)
             {
                 var r = Call(FeatureId.ExtendedAdjustableDpi, 2, 0, 0, page);
-                if (ReadDpiValues(r, 3, values))
+                data.AddRange(r.Skip(3));
+                values.Clear();
+                if (ReadDpiValues(data.ToArray(), 0, values))
                     break;
             }
         }
@@ -295,5 +299,24 @@ public sealed class LogitechDevice
         var defaultX = U16(3);
         var x = U16(1) == 0 ? defaultX : U16(1);
         return new ExtendedDpiParameters(x, defaultX, U16(5), U16(7), r[9]);
+    }
+
+    // ---- Onboard profiles ----
+
+    /// <summary>
+    /// Whether the mouse runs from its onboard profile (settings stored on the mouse) or in host mode
+    /// (software sets DPI and the rest live, the way G HUB does).
+    /// </summary>
+    public OnboardMode GetOnboardMode()
+    {
+        // 0x8100 function 2 = getOnboardMode -> [mode]
+        var mode = Call(FeatureId.OnboardProfiles, 2)[0];
+        return Enum.IsDefined(typeof(OnboardMode), (int)mode) ? (OnboardMode)mode : OnboardMode.Unknown;
+    }
+
+    public void SetOnboardMode(OnboardMode mode)
+    {
+        // 0x8100 function 1 = setOnboardMode(mode)
+        Call(FeatureId.OnboardProfiles, 1, (byte)mode);
     }
 }

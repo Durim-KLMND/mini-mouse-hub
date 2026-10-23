@@ -11,6 +11,15 @@ public enum ChargingState
     Error,
 }
 
+public enum OnboardMode
+{
+    Unknown = 0,
+    /// <summary>The mouse uses the settings stored in its active onboard profile.</summary>
+    Onboard = 1,
+    /// <summary>Software controls DPI and other settings live.</summary>
+    Host = 2,
+}
+
 public enum BatteryLevel
 {
     Unknown,
@@ -44,7 +53,9 @@ public record DpiCapabilities(IReadOnlyList<DpiRange> Ranges)
     public int Min => Ranges.Min(r => r.Min);
     public int Max => Ranges.Max(r => r.Max);
 
-    public override string ToString() => string.Join(", ", Ranges);
+    public override string ToString() => Ranges.Count > 3
+        ? $"{Min}-{Max}, step size grows with DPI"
+        : string.Join(", ", Ranges);
 
     /// <summary>
     /// Parses the DPI list format shared by HID++ features 0x2201 and 0x2202: 2-byte values, where a value
@@ -52,21 +63,31 @@ public record DpiCapabilities(IReadOnlyList<DpiRange> Ranges)
     /// </summary>
     public static DpiCapabilities Parse(IReadOnlyList<int> values)
     {
+        // e.g. 100, E001, 200, E002, 500 means 100-200 in steps of 1, then 200-500 in steps of 2.
         var ranges = new List<DpiRange>();
+        int? pending = null;  // a plain value not yet emitted
+        int? lastEnd = null;  // end of the previous range, which can start the next one
         for (var i = 0; i < values.Count; i++)
         {
             var value = values[i];
-            if ((value & 0xE000) == 0xE000 && ranges.Count > 0 && i + 1 < values.Count)
+            var start = pending ?? lastEnd;
+            if ((value & 0xE000) == 0xE000 && start.HasValue && i + 1 < values.Count)
             {
-                var last = ranges[^1];
-                ranges[^1] = new DpiRange(last.Min, values[i + 1], value & 0x1FFF);
-                i++;
+                var end = values[++i];
+                ranges.Add(new DpiRange(start.Value, end, value & 0x1FFF));
+                lastEnd = end;
+                pending = null;
             }
             else
             {
-                ranges.Add(new DpiRange(value, value, 0));
+                if (pending.HasValue)
+                    ranges.Add(new DpiRange(pending.Value, pending.Value, 0));
+                pending = value;
+                lastEnd = null;
             }
         }
+        if (pending.HasValue)
+            ranges.Add(new DpiRange(pending.Value, pending.Value, 0));
         return new DpiCapabilities(ranges);
     }
 }

@@ -6,6 +6,7 @@ using MiniMouseHub.Core.Hidpp;
 //   mmh                 show every device found, with battery and DPI
 //   mmh features        also list every HID++ feature each device has
 //   mmh dpi <value>     set the DPI of the first mouse found
+//   mmh mode [host|onboard]  show or switch between onboard profile and host (software) mode
 //   mmh watch           print reports the devices send on their own (Ctrl+C to stop)
 //   add --debug to any command to print raw HID++ traffic
 
@@ -17,6 +18,11 @@ var launchedByDoubleClick = args.Length == 0 && !Console.IsInputRedirected;
 try
 {
     return Run();
+}
+catch (HidppException e)
+{
+    Console.WriteLine($"Error: {e.Message}");
+    return 1;
 }
 finally
 {
@@ -71,11 +77,14 @@ int Run()
             case "dpi":
                 return SetDpi(devices, positional.ElementAtOrDefault(1));
 
+            case "mode":
+                return Mode(devices, positional.ElementAtOrDefault(1));
+
             case "watch":
                 return Watch(channels);
 
             default:
-                Console.WriteLine($"Unknown command '{command}'. Use: info, features, dpi <value>, watch.");
+                Console.WriteLine($"Unknown command '{command}'. Use: info, features, dpi <value>, mode [host|onboard], watch.");
                 return 2;
         }
     }
@@ -122,7 +131,10 @@ void PrintDevice(LogitechDevice device, bool includeFeatures)
     }
 
     if (device.HasFeature(FeatureId.OnboardProfiles))
-        Console.WriteLine("  Has onboard profiles (needed later for button remapping)");
+    {
+        var mode = TryGetMode(device);
+        Console.WriteLine($"  Mode:     {(mode == OnboardMode.Host ? "host (software controls DPI)" : mode == OnboardMode.Onboard ? "onboard profile (settings stored on the mouse)" : "unknown")}");
+    }
 
     if (includeFeatures)
     {
@@ -157,12 +169,58 @@ int SetDpi(List<LogitechDevice> devices, string? value)
         return 2;
     }
 
-    mouse.SetDpi(dpi);
+    try
+    {
+        mouse.SetDpi(dpi);
+    }
+    catch (HidppErrorException e)
+    {
+        Console.WriteLine($"The mouse refused the DPI change: {e.Message}.");
+        if (mouse.HasFeature(FeatureId.OnboardProfiles) && TryGetMode(mouse) == OnboardMode.Onboard)
+            Console.WriteLine("It's running from its onboard profile, which ignores DPI changes from the computer. Run 'mmh mode host' first to test.");
+        return 1;
+    }
     var after = mouse.GetDpi();
     Console.WriteLine($"DPI changed from {before.Current} to {after.Current}.");
     if (after.Current != dpi)
         Console.WriteLine("The mouse didn't keep the new value. It may be using its onboard profile; this is expected to be handled in a later step.");
     return after.Current == dpi ? 0 : 1;
+}
+
+int Mode(List<LogitechDevice> devices, string? value)
+{
+    var mouse = devices.FirstOrDefault(d => d.HasFeature(FeatureId.OnboardProfiles));
+    if (mouse == null)
+    {
+        Console.WriteLine("No device with onboard profiles found.");
+        return 1;
+    }
+
+    if (value != null)
+    {
+        var target = value.ToLowerInvariant() switch
+        {
+            "host" => OnboardMode.Host,
+            "onboard" => OnboardMode.Onboard,
+            _ => OnboardMode.Unknown,
+        };
+        if (target == OnboardMode.Unknown)
+        {
+            Console.WriteLine("Usage: mmh mode [host|onboard]");
+            return 2;
+        }
+        mouse.SetOnboardMode(target);
+    }
+
+    var mode = mouse.GetOnboardMode();
+    Console.WriteLine($"Mode: {mode}");
+    return 0;
+}
+
+static OnboardMode TryGetMode(LogitechDevice device)
+{
+    try { return device.GetOnboardMode(); }
+    catch (HidppException) { return OnboardMode.Unknown; }
 }
 
 int Watch(List<HidppChannel> channels)
