@@ -85,54 +85,95 @@ public record ButtonBinding(byte[] Raw)
 }
 
 /// <summary>
-/// A decoded onboard profile. The raw sector bytes are kept so that fields this class doesn't
-/// understand are written back unchanged.
+/// Where things live inside a profile sector. Profile formats up to 5 store each DPI slot as 2 bytes;
+/// format 6 and later (PRO X Superlight 2 uses 7) store X, Y and lift-off distance in 5 bytes,
+/// which pushes everything after the DPI table down by 16 bytes.
+/// </summary>
+public record ProfileLayout(
+    int DefaultDpiIndexOffset,
+    int ShiftDpiIndexOffset,
+    int DpiOffset,
+    int DpiEntrySize,
+    int ButtonsOffset,
+    int GShiftButtonsOffset)
+{
+    public static ProfileLayout For(byte profileFormat) => profileFormat <= 5
+        ? new ProfileLayout(1, 2, 3, 2, 32, 96)
+        : new ProfileLayout(1, 2, 4, 5, 48, 112);
+
+    public bool HasSeparateY => DpiEntrySize >= 4;
+}
+
+/// <summary>
+/// A decoded onboard profile. Edits change the raw sector bytes in place, so fields this class
+/// doesn't understand are written back unchanged.
 /// </summary>
 public class OnboardProfile
 {
     public const int DpiSlotCount = 5;
 
     public ProfileHeader Header { get; }
+    public ProfileLayout Layout { get; }
     public byte[] Raw { get; }
+    public int ButtonCount { get; }
+    public int GShiftButtonCount { get; }
 
-    public OnboardProfile(ProfileHeader header, byte[] raw, int buttonCount, int gShiftButtonCount)
+    public OnboardProfile(ProfileHeader header, ProfileLayout layout, byte[] raw, int buttonCount, int gShiftButtonCount)
     {
         Header = header;
+        Layout = layout;
         Raw = raw;
         ButtonCount = buttonCount;
         GShiftButtonCount = gShiftButtonCount;
     }
 
-    public int ButtonCount { get; }
-    public int GShiftButtonCount { get; }
-
-    /// <summary>Report interval in milliseconds (1 = 1000 Hz). Newer mice may use another encoding.</summary>
+    /// <summary>Report rate code; on the Superlight 2 this looks like an index into the extended report rate list.</summary>
     public byte ReportRate => Raw[0];
-    public int DefaultDpiIndex => Raw[1];
-    public int ShiftDpiIndex => Raw[2];
+
+    /// <summary>The slot the mouse starts in. Not yet confirmed for format 7, so nothing relies on it.</summary>
+    public int DefaultDpiIndex => Raw[Layout.DefaultDpiIndexOffset];
+    public int ShiftDpiIndex => Raw[Layout.ShiftDpiIndexOffset];
 
     /// <summary>The 5 DPI slots the DPI button cycles through; 0 or 0xFFFF means the slot is unused.</summary>
-    public int[] DpiSlots => Enumerable.Range(0, DpiSlotCount).Select(i => Raw[3 + i * 2] | (Raw[4 + i * 2] << 8)).ToArray();
+    public int[] DpiSlots => Enumerable.Range(0, DpiSlotCount).Select(GetDpiSlot).ToArray();
 
-    public byte PowerMode => Raw[16];
-    public byte AngleSnapping => Raw[17];
-    public int WriteCount => Raw[18] | (Raw[19] << 8);
-
-    public ButtonBinding[] Buttons => Enumerable.Range(0, ButtonCount).Select(i => new ButtonBinding(Raw[(32 + i * 4)..(36 + i * 4)])).ToArray();
-    public ButtonBinding[] GShiftButtons => Enumerable.Range(0, GShiftButtonCount).Select(i => new ButtonBinding(Raw[(96 + i * 4)..(100 + i * 4)])).ToArray();
-
-    public string Name
+    public int GetDpiSlot(int slot)
     {
-        get
-        {
-            var bytes = Raw[160..208];
-            if (bytes.All(b => b == 0xFF)) return "";
-            return Encoding.Unicode.GetString(bytes).TrimEnd('\0', '￿');
-        }
+        var o = Layout.DpiOffset + slot * Layout.DpiEntrySize;
+        return Raw[o] | (Raw[o + 1] << 8);
     }
+
+    /// <summary>Changes one DPI slot (X and Y together) and updates the checksum.</summary>
+    public void SetDpiSlot(int slot, int dpi)
+    {
+        if (slot is < 0 or >= DpiSlotCount)
+            throw new ArgumentOutOfRangeException(nameof(slot));
+        var o = Layout.DpiOffset + slot * Layout.DpiEntrySize;
+        Raw[o] = (byte)dpi;
+        Raw[o + 1] = (byte)(dpi >> 8);
+        if (Layout.HasSeparateY)
+        {
+            Raw[o + 2] = (byte)dpi;
+            Raw[o + 3] = (byte)(dpi >> 8);
+        }
+        UpdateCrc();
+    }
+
+    public ButtonBinding[] Buttons => ReadBindings(Layout.ButtonsOffset, ButtonCount);
+    public ButtonBinding[] GShiftButtons => ReadBindings(Layout.GShiftButtonsOffset, GShiftButtonCount);
+
+    private ButtonBinding[] ReadBindings(int offset, int count) =>
+        Enumerable.Range(0, count).Select(i => new ButtonBinding(Raw[(offset + i * 4)..(offset + i * 4 + 4)])).ToArray();
 
     public int StoredCrc => (Raw[^2] << 8) | Raw[^1];
     public bool CrcIsValid => StoredCrc == Crc16.Compute(Raw.AsSpan(0, Raw.Length - 2));
+
+    private void UpdateCrc()
+    {
+        var crc = Crc16.Compute(Raw.AsSpan(0, Raw.Length - 2));
+        Raw[^2] = (byte)(crc >> 8);
+        Raw[^1] = (byte)crc;
+    }
 }
 
 /// <summary>CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF), which onboard profile sectors end with.</summary>
@@ -151,8 +192,8 @@ public static class Crc16
     }
 }
 
-/// <summary>Reads the onboard profile memory of a device with feature 0x8100.</summary>
-public sealed class OnboardProfileReader(LogitechDevice device)
+/// <summary>Reads and writes the onboard profile memory of a device with feature 0x8100.</summary>
+public sealed class OnboardProfileStore(LogitechDevice device)
 {
     public OnboardDescription GetDescription()
     {
@@ -202,7 +243,8 @@ public sealed class OnboardProfileReader(LogitechDevice device)
     {
         var raw = ReadSector(header.Sector, description.SectorSize);
         var gShift = description.HasGShiftButtons ? description.ButtonCount : 0;
-        return new OnboardProfile(header, raw, Math.Min((int)description.ButtonCount, 16), Math.Min(gShift, 16));
+        var layout = ProfileLayout.For(description.ProfileFormat);
+        return new OnboardProfile(header, layout, raw, Math.Min((int)description.ButtonCount, 16), Math.Min(gShift, 16));
     }
 
     /// <summary>
@@ -230,5 +272,75 @@ public sealed class OnboardProfileReader(LogitechDevice device)
     {
         // Function 5 = memoryRead(sector (2 bytes), offset (2 bytes)) -> 16 bytes
         return device.Call(FeatureId.OnboardProfiles, 5, (byte)(sector >> 8), (byte)sector, (byte)(offset >> 8), (byte)offset);
+    }
+
+    /// <summary>Switches to a profile, which also makes the mouse reload it from memory.</summary>
+    public void SetCurrentProfile(int profile)
+    {
+        // Function 3 = setCurrentProfile(profile (2 bytes))
+        device.Call(FeatureId.OnboardProfiles, 3, (byte)(profile >> 8), (byte)profile);
+    }
+
+    public void SetCurrentDpiIndex(int index)
+    {
+        // Function 12 = setCurrentDpiIndex(index)
+        device.Call(FeatureId.OnboardProfiles, 12, (byte)index);
+    }
+
+    /// <summary>
+    /// Writes a whole sector, then reads it back to check it. The data must already end in a valid CRC.
+    /// Read-only (ROM) sectors are refused.
+    /// </summary>
+    public void WriteSector(int sector, byte[] data)
+    {
+        if (sector >= 0x100)
+            throw new HidppException($"Sector 0x{sector:X4} is read-only.");
+        if ((data[^2] << 8 | data[^1]) != Crc16.Compute(data.AsSpan(0, data.Length - 2)))
+            throw new HidppException("Refusing to write a sector with a bad checksum.");
+
+        // Function 6 = memoryAddrWrite(sector (2 bytes), offset (2 bytes), length (2 bytes))
+        device.Call(FeatureId.OnboardProfiles, 6, (byte)(sector >> 8), (byte)sector, 0, 0, (byte)(data.Length >> 8), (byte)data.Length);
+        for (var offset = 0; offset < data.Length; offset += 16)
+        {
+            // Function 7 = memoryWrite(16 bytes); the last chunk is padded.
+            var chunk = new byte[16];
+            Array.Fill(chunk, (byte)0xFF);
+            data.AsSpan(offset, Math.Min(16, data.Length - offset)).CopyTo(chunk);
+            device.Call(FeatureId.OnboardProfiles, 7, chunk);
+        }
+        // Function 8 = memoryWriteEnd
+        device.Call(FeatureId.OnboardProfiles, 8);
+
+        var readBack = ReadSector(sector, data.Length);
+        if (!readBack.AsSpan().SequenceEqual(data))
+            throw new HidppException($"Sector 0x{sector:X4} didn't read back the same as what was written.");
+    }
+
+    /// <summary>
+    /// Changes one DPI slot of the active profile, saves it to the mouse, and makes it take effect.
+    /// Returns the profile as it was before the change, for backup.
+    /// </summary>
+    public (byte[] Before, OnboardProfile After) SetDpiInActiveProfile(int slot, int dpi)
+    {
+        var description = GetDescription();
+        var current = GetCurrentProfile();
+        if (current >= 0x100)
+            throw new HidppException("The mouse is running a read-only factory profile; there is no writable profile to change.");
+        var header = GetProfileHeaders(description).FirstOrDefault(h => h.Number == current)
+            ?? throw new HidppException($"Active profile {current} isn't in the profile directory.");
+
+        var profile = ReadProfile(header, description);
+        if (!profile.CrcIsValid)
+            throw new HidppException("The active profile's checksum is wrong; not touching it.");
+        var before = (byte[])profile.Raw.Clone();
+        var dpiIndex = GetCurrentDpiIndex();
+
+        profile.SetDpiSlot(slot, dpi);
+        WriteSector(header.Sector, profile.Raw);
+
+        // Reload the profile so the change applies now, and stay on the slot that was in use.
+        SetCurrentProfile(current);
+        SetCurrentDpiIndex(dpiIndex);
+        return (before, profile);
     }
 }
