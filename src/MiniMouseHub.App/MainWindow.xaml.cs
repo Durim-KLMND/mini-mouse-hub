@@ -110,7 +110,7 @@ public partial class MainWindow : Window
         _devicePage = null;
         BackButton.Visibility = Visibility.Visible;
         TitleText.Text = "Settings";
-        Page.Content = SettingsPage.Build(_settings, _checkForUpdates);
+        Page.Content = SettingsPage.Build(_settings, _checkForUpdates, ShowSettings);
     }
 
     private void Back_Click(object sender, RoutedEventArgs e) => ShowHome();
