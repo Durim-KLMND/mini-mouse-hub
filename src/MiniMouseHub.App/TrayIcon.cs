@@ -35,18 +35,19 @@ public sealed class TrayIcon : IDisposable
         SetIcon(null, false);
     }
 
-    public void Update(MouseState state)
+    /// <summary>Shows the battery of the first mouse (or else the first device with a battery) and lists all devices in the tooltip.</summary>
+    public void Update(IReadOnlyList<DeviceState> devices)
     {
-        var percent = state.MouseAwake ? state.Battery?.Percent : null;
-        var charging = state.Battery?.IsCharging == true;
-        SetIcon(percent, charging);
+        var main = devices.Where(d => d.Battery != null).OrderBy(d => d.Kind == DeviceKind.Mouse ? 0 : 1).FirstOrDefault();
+        var percent = main is { Awake: true } ? main.Battery?.Percent : null;
+        SetIcon(percent, main?.Battery?.IsCharging == true);
 
-        var tooltip = state switch
-        {
-            { ReceiverFound: false } => "Mini Mouse Hub: no receiver",
-            { MouseAwake: false } => $"{state.Name ?? "Mouse"}: asleep",
-            _ => $"{state.Name}: {(percent is { } p ? $"{p}%" : "battery unknown")}{(charging ? ", charging" : "")}, {state.Dpi} DPI",
-        };
+        var lines = devices.Count == 0
+            ? ["No devices found"]
+            : devices.Select(d => d.Awake
+                ? $"{d.Name}: {(d.Battery?.Percent is { } p ? $"{p}%" : "connected")}{(d.Battery?.IsCharging == true ? " (charging)" : "")}"
+                : $"{d.Name}: asleep");
+        var tooltip = string.Join("\n", lines);
         _icon.Text = tooltip.Length > 63 ? tooltip[..63] : tooltip; // Windows limit
     }
 
@@ -67,10 +68,10 @@ public sealed class TrayIcon : IDisposable
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             var color = percent switch
             {
-                null => Color.FromArgb(0x90, 0x97, 0xA3),
-                <= 10 => Color.FromArgb(0xEF, 0x5B, 0x5B),
-                <= 20 => Color.FromArgb(0xF0, 0xB5, 0x4A),
-                _ => charging ? Color.FromArgb(0x4F, 0xA3, 0xFF) : Color.FromArgb(0x4C, 0xC3, 0x8A),
+                null => Color.FromArgb(0x5F, 0x62, 0x5F),
+                <= 10 => Color.FromArgb(0xB4, 0x23, 0x18),
+                <= 20 => Color.FromArgb(0xB4, 0x53, 0x09),
+                _ => charging ? Color.FromArgb(0x00, 0x4B, 0x4A) : Color.FromArgb(0x15, 0x80, 0x3D),
             };
             using var background = new SolidBrush(color);
             using var path = RoundedRect(new RectangleF(1, 1, 30, 30), 7);

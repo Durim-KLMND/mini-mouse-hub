@@ -113,6 +113,13 @@ public sealed class LogitechDevice
         return name.ToString();
     }
 
+    public DeviceKind GetKind()
+    {
+        // 0x0005 function 2 = getDeviceType -> [type]
+        var type = Call(FeatureId.DeviceName, 2)[0];
+        return Enum.IsDefined(typeof(DeviceKind), (int)type) ? (DeviceKind)type : DeviceKind.Unknown;
+    }
+
     // ---- Battery ----
 
     public BatteryInfo GetBattery()

@@ -11,6 +11,29 @@ public enum ChargingState
     Error,
 }
 
+/// <summary>Device types reported by HID++ feature 0x0005.</summary>
+public enum DeviceKind
+{
+    Keyboard = 0,
+    RemoteControl = 1,
+    Numpad = 2,
+    Mouse = 3,
+    Trackpad = 4,
+    Trackball = 5,
+    Presenter = 6,
+    Receiver = 7,
+    Headset = 8,
+    Webcam = 9,
+    SteeringWheel = 10,
+    Joystick = 11,
+    Gamepad = 12,
+    Dock = 13,
+    Speaker = 14,
+    Microphone = 15,
+    Light = 16,
+    Unknown = 255,
+}
+
 public enum OnboardMode
 {
     Unknown = 0,
