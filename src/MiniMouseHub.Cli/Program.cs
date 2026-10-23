@@ -7,6 +7,7 @@ using MiniMouseHub.Core.Hidpp;
 //   mmh features        also list every HID++ feature each device has
 //   mmh dpi <value>     set the DPI of the first mouse found
 //   mmh mode [host|onboard]  show or switch between onboard profile and host (software) mode
+//   mmh profile         show the onboard profiles (read-only) and save a backup of their raw bytes
 //   mmh watch           print reports the devices send on their own (Ctrl+C to stop)
 //   add --debug to any command to print raw HID++ traffic
 
@@ -80,11 +81,15 @@ int Run()
             case "mode":
                 return Mode(devices, positional.ElementAtOrDefault(1));
 
+            case "profile":
+            case "profiles":
+                return ShowProfiles(devices);
+
             case "watch":
                 return Watch(channels);
 
             default:
-                Console.WriteLine($"Unknown command '{command}'. Use: info, features, dpi <value>, mode [host|onboard], watch.");
+                Console.WriteLine($"Unknown command '{command}'. Use: info, features, dpi <value>, mode [host|onboard], profile, watch.");
                 return 2;
         }
     }
@@ -214,6 +219,57 @@ int Mode(List<LogitechDevice> devices, string? value)
 
     var mode = mouse.GetOnboardMode();
     Console.WriteLine($"Mode: {mode}");
+    return 0;
+}
+
+int ShowProfiles(List<LogitechDevice> devices)
+{
+    var mouse = devices.FirstOrDefault(d => d.HasFeature(FeatureId.OnboardProfiles));
+    if (mouse == null)
+    {
+        Console.WriteLine("No device with onboard profiles found.");
+        return 1;
+    }
+
+    var reader = new OnboardProfileReader(mouse);
+    var description = reader.GetDescription();
+    Console.WriteLine($"Profile memory: format {description.ProfileFormat}, macro format {description.MacroFormat}, memory model {description.MemoryModel}");
+    Console.WriteLine($"  {description.ProfileCount} profiles ({description.ProfileCountOutOfBox} out of the box), {description.ButtonCount} buttons, " +
+                      $"{description.SectorCount} sectors of {description.SectorSize} bytes, layout 0x{description.MechanicalLayout:X2}, info 0x{description.VariousInfo:X2}");
+
+    var current = reader.GetCurrentProfile();
+    Console.WriteLine($"  Active profile: {(current >= 0x100 ? $"factory profile {current & 0xFF}" : current.ToString())}, " +
+                      $"DPI slot {reader.GetCurrentDpiIndex() + 1}");
+    Console.WriteLine();
+
+    var backupDir = Path.Combine(AppContext.BaseDirectory, "profile-backups", DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+    Directory.CreateDirectory(backupDir);
+    File.WriteAllBytes(Path.Combine(backupDir, "description.bin"), mouse.Call(FeatureId.OnboardProfiles, 0));
+    File.WriteAllBytes(Path.Combine(backupDir, "sector-0000.bin"), reader.ReadSector(0x0000, description.SectorSize));
+
+    foreach (var header in reader.GetProfileHeaders(description))
+    {
+        var profile = reader.ReadProfile(header, description);
+        File.WriteAllBytes(Path.Combine(backupDir, $"sector-{header.Sector:X4}.bin"), profile.Raw);
+
+        var where = header.IsReadOnly ? "factory, read-only" : "writable";
+        var name = profile.Name.Length > 0 ? $" \"{profile.Name}\"" : "";
+        Console.WriteLine($"Profile {header.Number}{name}  [sector 0x{header.Sector:X4}, {where}, {(header.Enabled ? "enabled" : "disabled")}, " +
+                          $"checksum {(profile.CrcIsValid ? "OK" : "MISMATCH")}]");
+        var slots = profile.DpiSlots.Select((dpi, i) =>
+            (dpi is 0 or 0xFFFF ? "-" : dpi.ToString()) + (i == profile.DefaultDpiIndex ? "*" : "")).ToArray();
+        Console.WriteLine($"  DPI slots:   {string.Join("  ", slots)}   (* = default, shift slot {profile.ShiftDpiIndex + 1})");
+        Console.WriteLine($"  Report rate: raw 0x{profile.ReportRate:X2}, power mode 0x{profile.PowerMode:X2}, angle snapping 0x{profile.AngleSnapping:X2}, written {profile.WriteCount} times");
+        for (var i = 0; i < profile.Buttons.Length; i++)
+            Console.WriteLine($"  Button {i + 1}:    {profile.Buttons[i]}");
+        for (var i = 0; i < profile.GShiftButtons.Length; i++)
+            Console.WriteLine($"  G-Shift {i + 1}:   {profile.GShiftButtons[i]}");
+        if (debug)
+            Console.WriteLine($"  Raw: {Hex(profile.Raw)}");
+        Console.WriteLine();
+    }
+
+    Console.WriteLine($"Backup saved to {backupDir}");
     return 0;
 }
 
