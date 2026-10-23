@@ -123,3 +123,12 @@ public record FeatureInfo(byte Index, ushort Id, byte Type, byte Version)
     public bool IsHidden => (Type & 0x40) != 0;
     public bool IsEngineering => (Type & 0x20) != 0;
 }
+
+/// <summary>RGB settings that can be changed. Brightness, speed, hue and saturation run from 0 to 255; effect 0 means the lights are off.</summary>
+public record LightingSettings(int Effect, int Brightness, int Speed, int Hue, int Saturation)
+{
+    public bool IsOff => Effect == 0;
+}
+
+/// <param name="EffectNames">The effects the keyboard offers; effect number n is EffectNames[n - 1].</param>
+public record LightingState(LightingSettings Settings, IReadOnlyList<string> EffectNames);
