@@ -14,7 +14,7 @@ namespace MiniMouseHub.App;
 public sealed class GitHubSync
 {
     /// <summary>Client ID of the Mini Mouse Hub OAuth app (with Device Flow enabled). Client IDs are public.</summary>
-    public const string ClientId = "";
+    public const string ClientId = "Ov23liP8WLQzxcRmd1uq";
 
     public const string BackupFileName = "mini-mouse-hub-settings.json";
     private const string GistDescription = "Mini Mouse Hub settings backup";
