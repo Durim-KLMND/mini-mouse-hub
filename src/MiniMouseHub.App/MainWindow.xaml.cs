@@ -9,7 +9,7 @@ namespace MiniMouseHub.App;
 
 public partial class MainWindow : Window
 {
-    private enum PageKind { Home, Device, Settings }
+    private enum PageKind { Home, Device, Settings, KeyTester }
 
     private readonly DeviceMonitor _monitor;
     private readonly AppSettings _settings;
@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     private PageKind _page = PageKind.Home;
     private string? _deviceId;
     private DevicePage? _devicePage;
+    private KeyTesterPage? _keyTester;
 
     public MainWindow(DeviceMonitor monitor, AppSettings settings, Func<Task<string>> checkForUpdates)
     {
@@ -47,6 +48,9 @@ public partial class MainWindow : Window
                 break;
             case PageKind.Device when _devices.FirstOrDefault(d => d.Id == _deviceId) is { } device:
                 ShowDevice(device);
+                break;
+            case PageKind.KeyTester when _devices.FirstOrDefault(d => d.Id == _deviceId) is { } device:
+                ShowKeyTester(device);
                 break;
         }
     }
@@ -80,6 +84,9 @@ public partial class MainWindow : Window
                 else
                     _devicePage?.Update(device);
                 break;
+            case PageKind.KeyTester when devices.All(d => d.Id != _deviceId):
+                ShowHome(); // unplugged
+                break;
         }
     }
 
@@ -89,6 +96,7 @@ public partial class MainWindow : Window
     {
         _page = PageKind.Home;
         _devicePage = null;
+        _keyTester = null;
         BackButton.Visibility = Visibility.Collapsed;
         TitleText.Text = "Mini Mouse Hub";
         Page.Content = HomePage.Build(_devices, _firstScanDone, ShowDevice);
@@ -98,22 +106,61 @@ public partial class MainWindow : Window
     {
         _page = PageKind.Device;
         _deviceId = device.Id;
+        _keyTester = null;
         BackButton.Visibility = Visibility.Visible;
         TitleText.Text = device.DisplayName;
-        _devicePage = new DevicePage(_monitor, device);
+        _devicePage = new DevicePage(_monitor, device, () => ShowKeyTester(device));
         Page.Content = _devicePage.Root;
+    }
+
+    private void ShowKeyTester(DeviceState device)
+    {
+        _page = PageKind.KeyTester;
+        _deviceId = device.Id;
+        _devicePage = null;
+        BackButton.Visibility = Visibility.Visible;
+        TitleText.Text = $"{device.DisplayName}: key tester";
+        _keyTester = new KeyTesterPage();
+        Page.Content = _keyTester.Root;
+        Keyboard.ClearFocus(); // so no button reacts to Space or Enter
+    }
+
+    /// <summary>From the key tester, go back to its device; from anywhere else, go home.</summary>
+    private void GoBack()
+    {
+        if (_page == PageKind.KeyTester && _devices.FirstOrDefault(d => d.Id == _deviceId) is { } device)
+            ShowDevice(device);
+        else
+            ShowHome();
+    }
+
+    protected override void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        if (_keyTester != null)
+            _keyTester.OnKeyDown(e);
+        else
+            base.OnPreviewKeyDown(e);
+    }
+
+    protected override void OnPreviewKeyUp(KeyEventArgs e)
+    {
+        if (_keyTester != null)
+            _keyTester.OnKeyUp(e);
+        else
+            base.OnPreviewKeyUp(e);
     }
 
     private void ShowSettings()
     {
         _page = PageKind.Settings;
         _devicePage = null;
+        _keyTester = null;
         BackButton.Visibility = Visibility.Visible;
         TitleText.Text = "Settings";
         Page.Content = SettingsPage.Build(_settings, _checkForUpdates);
     }
 
-    private void Back_Click(object sender, RoutedEventArgs e) => ShowHome();
+    private void Back_Click(object sender, RoutedEventArgs e) => GoBack();
     private void Settings_Click(object sender, RoutedEventArgs e) => ShowSettings();
     private void Refresh_Click(object sender, RoutedEventArgs e) => _monitor.Refresh();
     private void Minimize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
@@ -123,7 +170,7 @@ public partial class MainWindow : Window
     {
         base.OnMouseDown(e);
         if (e.ChangedButton == MouseButton.XButton1 && _page != PageKind.Home)
-            ShowHome(); // mouse back button
+            GoBack(); // mouse back button
     }
 
     internal static Brush Res(string key) => (Brush)Application.Current.Resources[key];
