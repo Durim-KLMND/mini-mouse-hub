@@ -5,7 +5,7 @@ It talks to Logitech devices directly over HID++ 2.0, through a Lightspeed recei
 
 Status: early. The app and the `mmh` tool read battery, charging state and DPI, and set DPI (saved into the mouse's onboard profile).
 Keyboards with VIA firmware get a lighting card (on/off, effect, brightness, speed, color), saved on the keyboard.
-Tested targets: PRO X Superlight 2 on a Lightspeed receiver; Glorious GMMK Pro with QMK/VIA firmware.
+Tested target: PRO X Superlight 2 on a Lightspeed receiver. VIA support targets the Glorious GMMK Pro and is not yet tested on hardware.
 
 ## Layout
 
