@@ -1,0 +1,54 @@
+<Application x:Class="MiniMouseHub.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        <SolidColorBrush x:Key="Background" Color="#16181D" />
+        <SolidColorBrush x:Key="Surface" Color="#20232A" />
+        <SolidColorBrush x:Key="Border" Color="#2E323B" />
+        <SolidColorBrush x:Key="Text" Color="#ECEEF2" />
+        <SolidColorBrush x:Key="Muted" Color="#9097A3" />
+        <SolidColorBrush x:Key="Accent" Color="#4FA3FF" />
+        <SolidColorBrush x:Key="Good" Color="#4CC38A" />
+        <SolidColorBrush x:Key="Warn" Color="#F0B54A" />
+        <SolidColorBrush x:Key="Bad" Color="#EF5B5B" />
+
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource Surface}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Border}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="18,16" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+        <Style x:Key="Label" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource Muted}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Background" Value="{StaticResource Accent}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="14,7" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.4" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.85" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Application.Resources>
+</Application>
