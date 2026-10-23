@@ -5,22 +5,23 @@
         Icon="Assets/app.ico"
         Width="780" Height="560" MinWidth="520" MinHeight="420"
         WindowStartupLocation="CenterScreen"
-        Background="{StaticResource Background}"
-        Foreground="{StaticResource Text}"
-        FontFamily="Segoe UI" FontSize="14">
+        Background="{DynamicResource Background}"
+        Foreground="{DynamicResource Text}"
+        FontFamily="{StaticResource UiFont}" FontSize="14">
     <WindowChrome.WindowChrome>
-        <WindowChrome CaptionHeight="44" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False" />
+        <WindowChrome CaptionHeight="32" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False" />
     </WindowChrome.WindowChrome>
 
     <Grid x:Name="Root">
         <Grid.RowDefinitions>
-            <RowDefinition Height="44" />
+            <RowDefinition Height="32" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="52" />
+            <RowDefinition Height="48" />
         </Grid.RowDefinitions>
 
         <!-- Title bar -->
-        <Grid Background="#111317">
+        <Border Background="{DynamicResource Chrome}" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1">
+        <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
@@ -28,9 +29,9 @@
             </Grid.ColumnDefinitions>
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <Button x:Name="BackButton" Content="&#xE72B;" Style="{StaticResource ChromeButton}" FontSize="13"
-                        Height="44" Click="Back_Click" Visibility="Collapsed" ToolTip="Back" />
-                <Image Source="Assets/app.ico" Width="18" Height="18" Margin="14,0,10,0" />
-                <TextBlock x:Name="TitleText" Text="Mini Mouse Hub" FontSize="13" VerticalAlignment="Center" />
+                        Height="32" Click="Back_Click" Visibility="Collapsed" ToolTip="Back" />
+                <Image Source="Assets/app.ico" Width="16" Height="16" Margin="14,0,10,0" />
+                <TextBlock x:Name="TitleText" Text="Mini Mouse Hub" FontSize="12" VerticalAlignment="Center" />
             </StackPanel>
             <StackPanel Grid.Column="2" Orientation="Horizontal">
                 <Button Content="&#xE72C;" Style="{StaticResource ChromeButton}" Click="Refresh_Click" ToolTip="Look for devices again" />
@@ -38,6 +39,7 @@
                 <Button Content="&#xE8BB;" Style="{StaticResource CloseButton}" Click="Close_Click" ToolTip="Close to the tray" />
             </StackPanel>
         </Grid>
+        </Border>
 
         <!-- Page -->
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
@@ -45,7 +47,8 @@
         </ScrollViewer>
 
         <!-- Bottom bar -->
-        <Grid Grid.Row="2" Background="#111317">
+        <Border Grid.Row="2" Background="{DynamicResource Chrome}" BorderBrush="{DynamicResource Border}" BorderThickness="0,1,0,0">
+        <Grid>
             <Button Style="{StaticResource FlatButton}" HorizontalAlignment="Left" Margin="12,0,0,0" Click="Settings_Click">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="&#xE713;" FontFamily="{StaticResource Icons}" FontSize="15" VerticalAlignment="Center" Margin="0,0,8,0" />
@@ -53,7 +56,8 @@
                 </StackPanel>
             </Button>
             <TextBlock x:Name="FooterText" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,20,0"
-                       Foreground="{StaticResource Muted}" FontSize="12" />
+                       Foreground="{DynamicResource Muted}" FontSize="12" />
         </Grid>
+        </Border>
     </Grid>
 </Window>

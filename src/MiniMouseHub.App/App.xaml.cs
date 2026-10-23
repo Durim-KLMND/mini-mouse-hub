@@ -39,6 +39,7 @@ public partial class App : Application
         Task.Run(Updater.CleanUpOldVersion);
         StartWithWindows.RefreshPath();
 
+        Theme.Initialize(_settings.Theme);
         _monitor = new DeviceMonitor();
         _window = new MainWindow(_monitor, _settings, CheckForUpdatesFromSettings);
         _tray = new TrayIcon(ShowWindow, Quit);

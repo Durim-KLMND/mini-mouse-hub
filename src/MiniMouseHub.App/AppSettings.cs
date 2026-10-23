@@ -9,6 +9,7 @@ public class AppSettings
     public bool LowBatteryNotifications { get; set; } = true;
     public bool DpiNotifications { get; set; } = true;
     public bool AutoUpdate { get; set; } = true;
+    public ThemeChoice Theme { get; set; } = ThemeChoice.System;
 
     private static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MiniMouseHub", "settings.json");

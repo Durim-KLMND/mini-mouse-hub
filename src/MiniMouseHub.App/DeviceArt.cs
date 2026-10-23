@@ -53,11 +53,11 @@ public static class DeviceArt
     }
 
     private static Brush BodyBrush => new LinearGradientBrush(
-        Color.FromRgb(0x3A, 0x3E, 0x47), Color.FromRgb(0x1E, 0x21, 0x27), new Point(0, 0), new Point(1, 1));
+        Color.FromRgb(0x3B, 0x3B, 0x39), Color.FromRgb(0x1C, 0x1C, 0x1B), new Point(0, 0), new Point(1, 1));
 
-    private static Brush EdgeBrush => new SolidColorBrush(Color.FromRgb(0x55, 0x5B, 0x66));
+    private static Brush EdgeBrush => new SolidColorBrush(Color.FromRgb(0x5A, 0x5A, 0x57));
 
-    private static Brush AccentBrush => new SolidColorBrush(Color.FromRgb(0xE5, 0x39, 0x35));
+    private static Brush AccentBrush => new SolidColorBrush(Color.FromRgb(0x5C, 0xBD, 0xB4));
 
     private static Canvas Mouse()
     {
@@ -65,7 +65,7 @@ public static class DeviceArt
         canvas.Children.Add(Shape("M 60,5 C 95,5 108,35 108,70 L 108,135 C 108,180 88,205 60,205 C 32,205 12,180 12,135 L 12,70 C 12,35 25,5 60,5 Z", BodyBrush, EdgeBrush, 2));
         canvas.Children.Add(Shape("M 60,6 L 60,78", null, EdgeBrush, 2));
         canvas.Children.Add(Shape("M 13,74 C 35,84 85,84 107,74", null, EdgeBrush, 2));
-        canvas.Children.Add(Shape("M 55,28 A 5,5 0 0 1 65,28 L 65,52 A 5,5 0 0 1 55,52 Z", new SolidColorBrush(Color.FromRgb(0x14, 0x16, 0x1A)), EdgeBrush, 1.5));
+        canvas.Children.Add(Shape("M 55,28 A 5,5 0 0 1 65,28 L 65,52 A 5,5 0 0 1 55,52 Z", new SolidColorBrush(Color.FromRgb(0x14, 0x14, 0x13)), EdgeBrush, 1.5));
         canvas.Children.Add(Shape("M 50,180 L 70,180", null, AccentBrush, 3));
         return canvas;
     }
@@ -74,7 +74,7 @@ public static class DeviceArt
     {
         var canvas = new Canvas { Width = 260, Height = 100 };
         canvas.Children.Add(new Rectangle { Width = 256, Height = 96, RadiusX = 10, RadiusY = 10, Fill = BodyBrush, Stroke = EdgeBrush, StrokeThickness = 2 });
-        var keyBrush = new SolidColorBrush(Color.FromRgb(0x14, 0x16, 0x1A));
+        var keyBrush = new SolidColorBrush(Color.FromRgb(0x14, 0x14, 0x13));
         for (var row = 0; row < 4; row++)
         {
             for (var col = 0; col < 14; col++)

@@ -68,10 +68,10 @@ public sealed class TrayIcon : IDisposable
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             var color = percent switch
             {
-                null => Color.FromArgb(0x90, 0x97, 0xA3),
-                <= 10 => Color.FromArgb(0xEF, 0x5B, 0x5B),
-                <= 20 => Color.FromArgb(0xF0, 0xB5, 0x4A),
-                _ => charging ? Color.FromArgb(0x4F, 0xA3, 0xFF) : Color.FromArgb(0x4C, 0xC3, 0x8A),
+                null => Color.FromArgb(0x5F, 0x62, 0x5F),
+                <= 10 => Color.FromArgb(0xB4, 0x23, 0x18),
+                <= 20 => Color.FromArgb(0xB4, 0x53, 0x09),
+                _ => charging ? Color.FromArgb(0x00, 0x4B, 0x4A) : Color.FromArgb(0x15, 0x80, 0x3D),
             };
             using var background = new SolidBrush(color);
             using var path = RoundedRect(new RectangleF(1, 1, 30, 30), 7);

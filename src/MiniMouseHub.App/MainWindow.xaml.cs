@@ -31,6 +31,24 @@ public partial class MainWindow : Window
         FooterText.Text = $"Version {Updater.CurrentVersion}";
         StateChanged += (_, _) => Root.Margin = WindowState == WindowState.Maximized ? new Thickness(7) : new Thickness(0);
         ShowHome();
+        Theme.Changed += Redraw;
+    }
+
+    /// <summary>Pages built in code take their colors when they are built, so build the current one again.</summary>
+    private void Redraw()
+    {
+        switch (_page)
+        {
+            case PageKind.Home:
+                ShowHome();
+                break;
+            case PageKind.Settings:
+                ShowSettings();
+                break;
+            case PageKind.Device when _devices.FirstOrDefault(d => d.Id == _deviceId) is { } device:
+                ShowDevice(device);
+                break;
+        }
     }
 
     /// <summary>Lets the next Close() really close the window instead of hiding it.</summary>

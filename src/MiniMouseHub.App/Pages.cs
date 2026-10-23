@@ -63,7 +63,7 @@ internal static class Ui
         var grid = new Grid { Height = height };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(percent, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100 - percent, GridUnitType.Star) });
-        var track = new Border { CornerRadius = new CornerRadius(height / 2), Background = Res("Border") };
+        var track = new Border { CornerRadius = new CornerRadius(height / 2), Background = Res("Track") };
         Grid.SetColumnSpan(track, 2);
         grid.Children.Add(track);
         grid.Children.Add(new Border { CornerRadius = new CornerRadius(height / 2), Background = Res(BatteryColor(battery)) });
@@ -158,7 +158,7 @@ internal sealed class DevicePage
     private readonly WrapPanel _slots = new() { Margin = new Thickness(0, 6, 0, 0) };
     private readonly TextBlock _slotsLabel = Ui.Label("DPI slots: click one to switch, or press the DPI button on the mouse");
     private readonly TextBox _dpiInput = new() { Padding = new Thickness(8, 6, 8, 6) };
-    private readonly Button _apply = new() { Content = "Apply", Margin = new Thickness(8, 0, 0, 0) };
+    private readonly Button _apply = new() { Content = "Apply", Margin = new Thickness(8, 0, 0, 0), Style = (Style)Application.Current.Resources["PrimaryButton"] };
     private readonly TextBlock _dpiHint = Ui.Text("", 12, "Muted");
     private readonly Border _dpiCard;
 
@@ -169,10 +169,6 @@ internal sealed class DevicePage
         _monitor = monitor;
         _device = device;
 
-        _dpiInput.Background = Res("Background");
-        _dpiInput.Foreground = Res("Text");
-        _dpiInput.BorderBrush = Res("Border");
-        _dpiInput.CaretBrush = Res("Text");
         _dpiInput.KeyDown += (_, e) => { if (e.Key == Key.Enter) Apply(); };
         _apply.Click += (_, _) => Apply();
         _dpiHint.Margin = new Thickness(0, 6, 0, 0);
@@ -261,8 +257,9 @@ internal sealed class DevicePage
                 {
                     Style = (Style)Application.Current.Resources["Pill"],
                     Content = device.DpiSlots[i].ToString(),
-                    Background = active ? Res("Accent") : Res("Border"),
-                    Foreground = active ? Brushes.White : Res("Text"),
+                    Background = active ? Res("Accent") : Res("Background"),
+                    Foreground = active ? Res("AccentText") : Res("Text"),
+                    BorderBrush = active ? Res("Accent") : Res("Border"),
                     ToolTip = active ? "Current DPI slot" : "Switch to this DPI",
                 };
                 pill.Click += async (_, _) => await SelectSlot(slot);
@@ -340,6 +337,22 @@ internal static class SettingsPage
         general.Children.Add(Toggle("Start with Windows (in the tray)", StartWithWindows.IsEnabled, on => StartWithWindows.IsEnabled = on));
         panel.Children.Add(Ui.Card(general));
 
+        var appearance = new StackPanel();
+        appearance.Children.Add(Ui.Label("APPEARANCE"));
+        foreach (var (choice, text) in new[] { (ThemeChoice.System, "Match Windows"), (ThemeChoice.Light, "Light"), (ThemeChoice.Dark, "Dark") })
+        {
+            var option = new RadioButton { Content = text, GroupName = "Theme", IsChecked = settings.Theme == choice };
+            option.Checked += (_, _) =>
+            {
+                if (settings.Theme == choice) return;
+                settings.Theme = choice;
+                settings.Save();
+                Theme.Set(choice);
+            };
+            appearance.Children.Add(option);
+        }
+        panel.Children.Add(Ui.Card(appearance));
+
         var notifications = new StackPanel();
         notifications.Children.Add(Ui.Label("NOTIFICATIONS"));
         notifications.Children.Add(Toggle("Warn me when a battery runs low (20%, 10% and 5%)", settings.LowBatteryNotifications, on => { settings.LowBatteryNotifications = on; settings.Save(); }));
@@ -366,11 +379,6 @@ internal static class SettingsPage
         row.Children.Add(result);
         updates.Children.Add(row);
         panel.Children.Add(Ui.Card(updates));
-
-        var about = new StackPanel();
-        about.Children.Add(Ui.Label("PICTURES"));
-        about.Children.Add(Ui.Text("To show your own picture of a device, put a PNG named after it (for example \"PRO X 2.png\") in an \"images\" folder next to MiniMouseHub.exe.", 12, "Muted"));
-        panel.Children.Add(Ui.Card(about));
         return panel;
     }
 
