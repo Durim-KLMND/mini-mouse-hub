@@ -98,7 +98,7 @@ public partial class MainWindow : Window
         _devicePage = null;
         _keyTester = null;
         BackButton.Visibility = Visibility.Collapsed;
-        TitleText.Text = "Mini Mouse Hub";
+        TitleText.Text = "Mini mouse hub";
         Page.Content = HomePage.Build(_devices, _firstScanDone, ShowDevice);
     }
 

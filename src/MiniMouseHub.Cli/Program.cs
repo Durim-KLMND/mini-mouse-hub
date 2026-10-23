@@ -1,7 +1,7 @@
 using MiniMouseHub.Core;
 using MiniMouseHub.Core.Hidpp;
 
-// Mini Mouse Hub test tool: finds Logitech HID++ devices and reads battery and DPI.
+// Mini mouse hub test tool: finds Logitech HID++ devices and reads battery and DPI.
 //
 //   mmh                 show every device found, with battery and DPI
 //   mmh features        also list every HID++ feature each device has

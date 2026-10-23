@@ -17,13 +17,13 @@ public sealed class TrayIcon : IDisposable
     public TrayIcon(Action open, Action quit)
     {
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Open Mini Mouse Hub", null, (_, _) => open());
+        menu.Items.Add("Open Mini mouse hub", null, (_, _) => open());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => quit());
 
         _icon = new NotifyIcon
         {
-            Text = "Mini Mouse Hub",
+            Text = "Mini mouse hub",
             ContextMenuStrip = menu,
             Visible = true,
         };

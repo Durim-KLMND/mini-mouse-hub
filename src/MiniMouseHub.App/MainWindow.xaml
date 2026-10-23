@@ -1,7 +1,7 @@
 <Window x:Class="MiniMouseHub.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Mini Mouse Hub"
+        Title="Mini mouse hub"
         Icon="Assets/app.ico"
         Width="780" Height="560" MinWidth="520" MinHeight="420"
         WindowStartupLocation="CenterScreen"
@@ -31,7 +31,7 @@
                 <Button x:Name="BackButton" Content="&#xE72B;" Style="{StaticResource ChromeButton}" FontSize="13"
                         Height="32" Click="Back_Click" Visibility="Collapsed" ToolTip="Back" />
                 <Image Source="Assets/app.ico" Width="16" Height="16" Margin="14,0,10,0" />
-                <TextBlock x:Name="TitleText" Text="Mini Mouse Hub" FontSize="12" VerticalAlignment="Center" />
+                <TextBlock x:Name="TitleText" Text="Mini mouse hub" FontSize="12" VerticalAlignment="Center" />
             </StackPanel>
             <StackPanel Grid.Column="2" Orientation="Horizontal">
                 <Button Content="&#xE72C;" Style="{StaticResource ChromeButton}" Click="Refresh_Click" ToolTip="Look for devices again" />

@@ -30,7 +30,7 @@ public partial class App : Application
         catch (AbandonedMutexException) { isFirst = true; }
         if (!isFirst)
         {
-            MessageBox.Show("Mini Mouse Hub is already running. Look for it in the system tray.", "Mini Mouse Hub");
+            MessageBox.Show("Mini mouse hub is already running. Look for it in the system tray.", "Mini mouse hub");
             _singleInstance = null;
             Shutdown();
             return;
@@ -59,7 +59,7 @@ public partial class App : Application
         if (!e.Args.Contains("--minimized"))
             ShowWindow();
         if (justUpdated)
-            _tray.Notify("Mini Mouse Hub updated", $"You're now on version {Updater.CurrentVersion}.");
+            _tray.Notify("Mini mouse hub updated", $"You're now on version {Updater.CurrentVersion}.");
         _monitor.Start();
 
         _updateTimer = new System.Windows.Threading.DispatcherTimer { Interval = UpdateCheckInterval };

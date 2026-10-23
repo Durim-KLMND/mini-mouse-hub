@@ -10,6 +10,8 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyName>MiniMouseHub</AssemblyName>
     <RootNamespace>MiniMouseHub.App</RootNamespace>
+    <Product>Mini mouse hub</Product>
+    <AssemblyTitle>Mini mouse hub</AssemblyTitle>
     <Version>0.3.0</Version>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>

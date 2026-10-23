@@ -109,7 +109,7 @@ internal sealed class GitHubBackupCard
     {
         _content.Children.Clear();
         _content.Children.Add(Ui.Label("BACKUP TO GITHUB"));
-        _content.Children.Add(Ui.Text($"Enter this code at {device.VerificationUri} to let Mini Mouse Hub save gists for you:", 13, "Muted"));
+        _content.Children.Add(Ui.Text($"Enter this code at {device.VerificationUri} to let Mini mouse hub save gists for you:", 13, "Muted"));
         var code = new TextBox
         {
             Text = device.UserCode,
@@ -149,7 +149,7 @@ internal sealed class GitHubBackupCard
         var json = await _sync.DownloadAsync(_settings.GitHub!);
         if (json == null)
             return "There's no backup on GitHub yet. Use Back up now first.";
-        var answer = MessageBox.Show("Replace the settings on this PC with your backup from GitHub?", "Mini Mouse Hub",
+        var answer = MessageBox.Show("Replace the settings on this PC with your backup from GitHub?", "Mini mouse hub",
             MessageBoxButton.OKCancel, MessageBoxImage.Question);
         if (answer != MessageBoxResult.OK)
             return "Restore cancelled.";
