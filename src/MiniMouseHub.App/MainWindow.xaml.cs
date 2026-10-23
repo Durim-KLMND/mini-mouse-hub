@@ -98,7 +98,7 @@ public partial class MainWindow : Window
         _devicePage = null;
         _keyTester = null;
         BackButton.Visibility = Visibility.Collapsed;
-        TitleText.Text = "Mini Mouse Hub";
+        TitleText.Text = "Mini mouse hub";
         Page.Content = HomePage.Build(_devices, _firstScanDone, ShowDevice);
     }
 
@@ -157,7 +157,7 @@ public partial class MainWindow : Window
         _keyTester = null;
         BackButton.Visibility = Visibility.Visible;
         TitleText.Text = "Settings";
-        Page.Content = SettingsPage.Build(_settings, _checkForUpdates);
+        Page.Content = SettingsPage.Build(_settings, _checkForUpdates, ShowSettings);
     }
 
     private void Back_Click(object sender, RoutedEventArgs e) => GoBack();

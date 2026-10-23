@@ -1,6 +1,8 @@
-# Mini Mouse Hub
+<p align="center"><img src="docs/branding/logo.svg" width="96" alt="Mini mouse hub logo"></p>
 
-Mini Mouse Hub is a small Windows app for checking and changing your gaming gear's settings without installing the manufacturer's software (such as Logitech G HUB). It talks to the devices directly, stays out of the way in the system tray, and changes are saved on the device itself, so they keep working on any PC.
+# Mini mouse hub
+
+Mini mouse hub is a small Windows app for checking and changing your gaming gear's settings without installing the manufacturer's software (such as Logitech G HUB). It talks to the devices directly, stays out of the way in the system tray, and changes are saved on the device itself, so they keep working on any PC.
 
 ## What it does
 
@@ -10,6 +12,7 @@ Mini Mouse Hub is a small Windows app for checking and changing your gaming gear
 - Warns you when the battery runs low (20%, 10% and 5%) and when the DPI is changed with the mouse's button
 - Runs in the tray, can start with Windows, and has light and dark themes
 - Updates itself from this repository's GitHub releases (can be turned off in Settings)
+- Keeps its settings in a single file, `%LOCALAPPDATA%\MiniMouseHub\settings.json`, which you can back up to a secret gist by signing in to GitHub from Settings
 - Comes with `mmh`, a command-line tool for the same features
 
 ## Supported devices
@@ -22,7 +25,7 @@ Mini Mouse Hub is a small Windows app for checking and changing your gaming gear
 
 ## Not supported yet
 
-These big gaming mouse brands don't work with Mini Mouse Hub so far:
+These big gaming mouse brands don't work with Mini mouse hub so far:
 
 - Razer
 - SteelSeries
