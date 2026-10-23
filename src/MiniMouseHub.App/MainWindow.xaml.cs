@@ -1,7 +1,9 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using MiniMouseHub.Core;
 
@@ -69,6 +71,24 @@ public partial class MainWindow : Window
         }
         base.OnClosing(e);
     }
+
+    /// <summary>
+    /// Asks Windows 11 to round the window's corners like its own windows. The custom title bar removes the
+    /// standard frame, so Windows would otherwise draw square corners. Windows 10 ignores the request.
+    /// </summary>
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        var hwnd = new WindowInteropHelper(this).Handle;
+        var preference = DwmCornerRound;
+        DwmSetWindowAttribute(hwnd, DwmWindowCornerPreference, ref preference, sizeof(int));
+    }
+
+    private const int DwmWindowCornerPreference = 33;
+    private const int DwmCornerRound = 2;
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
     public void Render(IReadOnlyList<DeviceState> devices, bool firstScanDone)
     {

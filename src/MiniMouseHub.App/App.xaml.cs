@@ -39,6 +39,7 @@ public partial class App : Application
 
         Task.Run(Updater.CleanUpOldVersion);
         StartWithWindows.RefreshPath();
+        Installation.RefreshInstalledVersion();
 
         Theme.Initialize(_settings.Theme);
         _monitor = new DeviceMonitor();
