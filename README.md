@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/branding/logo.svg" width="96" alt="Mini Mouse Hub logo"></p>
+
 # Mini Mouse Hub
 
 Mini Mouse Hub is a small Windows app for checking and changing your gaming gear's settings without installing the manufacturer's software (such as Logitech G HUB). It talks to the devices directly, stays out of the way in the system tray, and changes are saved on the device itself, so they keep working on any PC.
