@@ -173,10 +173,11 @@ internal sealed class DevicePage
     private readonly TextBlock _note = Ui.Text("", 13);
     private readonly Border _noteCard;
     private readonly LightingCard _lighting;
+    private readonly Border _testerCard;
 
     public UIElement Root { get; }
 
-    public DevicePage(DeviceMonitor monitor, DeviceState device)
+    public DevicePage(DeviceMonitor monitor, DeviceState device, Action openKeyTester)
     {
         _monitor = monitor;
         _device = device;
@@ -239,6 +240,22 @@ internal sealed class DevicePage
         _lighting = new LightingCard(monitor, device);
         right.Children.Add(_lighting.Root);
 
+        var tester = new StackPanel();
+        tester.Children.Add(Ui.Label("KEY TESTER"));
+        var testerRow = new Grid();
+        testerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        testerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var testerText = Ui.Text("Check that every key and the knob register, and spot keys that chatter.", 13, "Muted");
+        testerText.VerticalAlignment = VerticalAlignment.Center;
+        testerRow.Children.Add(testerText);
+        var openTester = new Button { Content = "Open key tester", Margin = new Thickness(12, 0, 0, 0), Style = (Style)Application.Current.Resources["PrimaryButton"] };
+        openTester.Click += (_, _) => openKeyTester();
+        Grid.SetColumn(openTester, 1);
+        testerRow.Children.Add(openTester);
+        tester.Children.Add(testerRow);
+        _testerCard = Ui.Card(tester);
+        right.Children.Add(_testerCard);
+
         layout.Children.Add(right);
         Root = layout;
         Update(device);
@@ -259,6 +276,7 @@ internal sealed class DevicePage
         _noteCard.Visibility = device.Note != null ? Visibility.Visible : Visibility.Collapsed;
         _note.Text = device.Note ?? "";
         _lighting.Update(device);
+        _testerCard.Visibility = device.Kind == DeviceKind.Keyboard ? Visibility.Visible : Visibility.Collapsed;
 
         // A wired device without a battery reading has no battery; a wireless one may just be asleep.
         _batteryCard.Visibility = device.Battery != null || !device.IsWired ? Visibility.Visible : Visibility.Collapsed;
