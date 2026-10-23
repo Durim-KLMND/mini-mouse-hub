@@ -528,7 +528,7 @@ internal sealed class LightingCard
 /// <summary>App settings.</summary>
 internal static class SettingsPage
 {
-    public static UIElement Build(AppSettings settings, Func<Task<string>> checkForUpdates, Action rebuild)
+    public static UIElement Build(AppSettings settings, Func<Task<string>> checkForUpdates, SettingsSync sync)
     {
         var panel = new StackPanel { MaxWidth = 560, HorizontalAlignment = HorizontalAlignment.Left };
 
@@ -580,7 +580,7 @@ internal static class SettingsPage
         updates.Children.Add(row);
         panel.Children.Add(Ui.Card(updates));
 
-        panel.Children.Add(new GitHubBackupCard(settings, rebuild).Root);
+        panel.Children.Add(new GitHubSyncCard(settings, sync).Root);
         return panel;
     }
 

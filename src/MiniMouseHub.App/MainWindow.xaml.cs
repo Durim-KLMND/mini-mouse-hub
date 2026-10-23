@@ -14,6 +14,7 @@ public partial class MainWindow : Window
     private readonly DeviceMonitor _monitor;
     private readonly AppSettings _settings;
     private readonly Func<Task<string>> _checkForUpdates;
+    private readonly SettingsSync _sync;
     private IReadOnlyList<DeviceState> _devices = [];
     private bool _firstScanDone;
     private bool _allowClose;
@@ -23,11 +24,12 @@ public partial class MainWindow : Window
     private DevicePage? _devicePage;
     private KeyTesterPage? _keyTester;
 
-    public MainWindow(DeviceMonitor monitor, AppSettings settings, Func<Task<string>> checkForUpdates)
+    public MainWindow(DeviceMonitor monitor, AppSettings settings, Func<Task<string>> checkForUpdates, SettingsSync sync)
     {
         _monitor = monitor;
         _settings = settings;
         _checkForUpdates = checkForUpdates;
+        _sync = sync;
         InitializeComponent();
         FooterText.Text = $"Version {Updater.CurrentVersion}";
         StateChanged += (_, _) => Root.Margin = WindowState == WindowState.Maximized ? new Thickness(7) : new Thickness(0);
@@ -36,7 +38,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Pages built in code take their colors when they are built, so build the current one again.</summary>
-    private void Redraw()
+    internal void Redraw()
     {
         switch (_page)
         {
@@ -157,7 +159,7 @@ public partial class MainWindow : Window
         _keyTester = null;
         BackButton.Visibility = Visibility.Visible;
         TitleText.Text = "Settings";
-        Page.Content = SettingsPage.Build(_settings, _checkForUpdates, ShowSettings);
+        Page.Content = SettingsPage.Build(_settings, _checkForUpdates, _sync);
     }
 
     private void Back_Click(object sender, RoutedEventArgs e) => GoBack();

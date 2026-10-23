@@ -8,7 +8,7 @@ using System.Text.Json.Nodes;
 namespace MiniMouseHub.App;
 
 /// <summary>
-/// Signs in to GitHub with the OAuth device flow and keeps a backup of the settings in a secret gist.
+/// Signs in to GitHub with the OAuth device flow and stores the settings in a secret gist.
 /// The app only asks for the "gist" scope, so it can't see the user's repositories.
 /// </summary>
 public sealed class GitHubSync
@@ -17,7 +17,7 @@ public sealed class GitHubSync
     public const string ClientId = "Ov23liP8WLQzxcRmd1uq";
 
     public const string BackupFileName = "mini-mouse-hub-settings.json";
-    private const string GistDescription = "Mini mouse hub settings backup";
+    private const string GistDescription = "Mini mouse hub settings";
 
     private static readonly HttpClient Http = CreateClient();
 
@@ -94,7 +94,6 @@ public sealed class GitHubSync
             if (update.StatusCode != HttpStatusCode.NotFound)
             {
                 await EnsureSuccess(update);
-                account.LastBackup = DateTimeOffset.Now;
                 return;
             }
             // The gist was deleted on GitHub; make a new one.
@@ -105,7 +104,6 @@ public sealed class GitHubSync
         await EnsureSuccess(create);
         using var created = JsonDocument.Parse(await create.Content.ReadAsStringAsync());
         account.GistId = created.RootElement.GetProperty("id").GetString();
-        account.LastBackup = DateTimeOffset.Now;
     }
 
     /// <summary>Downloads the settings backup, or returns null if there isn't one.</summary>

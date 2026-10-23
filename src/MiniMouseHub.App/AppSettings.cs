@@ -16,8 +16,11 @@ public class AppSettings
     public bool AutoUpdate { get; set; } = true;
     public ThemeChoice Theme { get; set; } = ThemeChoice.System;
 
-    /// <summary>GitHub sign-in for backing up settings. Stays on this PC and is never uploaded.</summary>
+    /// <summary>GitHub sign-in for syncing settings. Stays on this PC and is never uploaded.</summary>
     public GitHubAccount? GitHub { get; set; }
+
+    /// <summary>Raised after the settings were written, so they can be synced.</summary>
+    public static event Action? Saved;
 
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
 
@@ -63,6 +66,7 @@ public class AppSettings
             File.WriteAllText(FilePath, JsonSerializer.Serialize(this, Indented));
         }
         catch (Exception) { }
+        Saved?.Invoke();
     }
 
     /// <summary>The settings as uploaded to GitHub: everything except the sign-in.</summary>
@@ -92,7 +96,10 @@ public class GitHubAccount
     public string Login { get; set; } = "";
     public string ProtectedToken { get; set; } = "";
     public string? GistId { get; set; }
-    public DateTimeOffset? LastBackup { get; set; }
+    public DateTimeOffset? LastSync { get; set; }
+
+    /// <summary>Hash of the settings as last synced, to tell whether this PC has changes GitHub doesn't.</summary>
+    public string? SyncedHash { get; set; }
 
     public static GitHubAccount Create(string login, string token) => new()
     {

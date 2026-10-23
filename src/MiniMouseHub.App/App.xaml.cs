@@ -13,6 +13,7 @@ public partial class App : Application
     private MainWindow? _window;
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly Updater _updater = new();
+    private SettingsSync? _sync;
     private readonly Dictionary<string, LowBatteryAlert> _lowBattery = new();
     private System.Windows.Threading.DispatcherTimer? _updateTimer;
     private bool _firstScanDone;
@@ -41,7 +42,13 @@ public partial class App : Application
 
         Theme.Initialize(_settings.Theme);
         _monitor = new DeviceMonitor();
-        _window = new MainWindow(_monitor, _settings, CheckForUpdatesFromSettings);
+        _sync = new SettingsSync(_settings);
+        _sync.Pulled += () =>
+        {
+            Theme.Set(_settings.Theme);
+            _window?.Redraw();
+        };
+        _window = new MainWindow(_monitor, _settings, CheckForUpdatesFromSettings, _sync);
         _tray = new TrayIcon(ShowWindow, Quit);
 
         _monitor.DevicesChanged += devices => Dispatcher.BeginInvoke(() => OnDevicesChanged(devices));
@@ -63,9 +70,17 @@ public partial class App : Application
         _monitor.Start();
 
         _updateTimer = new System.Windows.Threading.DispatcherTimer { Interval = UpdateCheckInterval };
-        _updateTimer.Tick += async (_, _) => await AutoUpdate();
+        _updateTimer.Tick += async (_, _) =>
+        {
+            await _sync.SyncAsync();
+            await AutoUpdate();
+        };
         _updateTimer.Start();
-        Dispatcher.BeginInvoke(async () => await AutoUpdate());
+        Dispatcher.BeginInvoke(async () =>
+        {
+            await _sync.SyncAsync();
+            await AutoUpdate();
+        });
     }
 
     private void OnDevicesChanged(IReadOnlyList<DeviceState> devices)
