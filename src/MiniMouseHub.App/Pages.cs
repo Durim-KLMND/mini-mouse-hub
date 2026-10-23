@@ -78,14 +78,13 @@ internal static class Ui
         _ => kind.ToString(),
     };
 
-    /// <summary>For example "Logitech mouse · Wireless" or "Glorious keyboard · Cable".</summary>
+    /// <summary>For example "Mouse · Wireless" or "Keyboard · connected by cable".</summary>
     public static string Describe(DeviceState device, bool longForm = false)
     {
-        var kind = device.Kind == DeviceKind.Unknown ? "device" : KindName(device.Kind).ToLowerInvariant();
         var connection = longForm
             ? (device.IsWired ? "connected by cable" : "wireless")
             : (device.IsWired ? "Cable" : "Wireless");
-        return $"{device.Vendor} {kind} · {connection}";
+        return $"{KindName(device.Kind)} · {connection}";
     }
 }
 
@@ -107,7 +106,7 @@ internal static class HomePage
         }
 
         var tiles = new WrapPanel();
-        foreach (var device in devices.OrderBy(d => d.Kind).ThenBy(d => d.Name))
+        foreach (var device in devices.OrderBy(d => d.Kind).ThenBy(d => d.DisplayName))
             tiles.Children.Add(Tile(device, open));
         panel.Children.Add(tiles);
         return panel;
@@ -126,7 +125,7 @@ internal static class HomePage
 
         var info = new StackPanel();
         Grid.SetRow(info, 1);
-        info.Children.Add(Ui.Text(device.Name, 15, weight: FontWeights.SemiBold));
+        info.Children.Add(Ui.Text(device.DisplayName, 15, weight: FontWeights.SemiBold));
         var status = device.Awake ? Ui.Describe(device) : "Asleep. Move it to wake it";
         info.Children.Add(Ui.Text(status, 12, "Muted"));
 

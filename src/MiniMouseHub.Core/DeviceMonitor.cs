@@ -25,6 +25,26 @@ public record DeviceState(
 {
     public bool HasDpi => DpiCapabilities != null;
     public bool HasLighting => Lighting != null;
+
+    /// <summary>Brand and model, such as "Logitech PRO X Superlight 2", so devices can be told apart at a glance.</summary>
+    public string DisplayName => DeviceNames.Display(Vendor, Name);
+}
+
+/// <summary>Turns the names devices report into the names people know them by.</summary>
+public static class DeviceNames
+{
+    // Devices whose own name is shorter than their product name.
+    private static readonly Dictionary<string, string> Models = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["PRO X 2"] = "PRO X Superlight 2",
+        ["PRO X SUPERLIGHT"] = "PRO X Superlight",
+    };
+
+    public static string Display(string vendor, string name)
+    {
+        var model = Models.GetValueOrDefault(name.Trim(), name.Trim());
+        return model.StartsWith(vendor, StringComparison.OrdinalIgnoreCase) ? model : $"{vendor} {model}";
+    }
 }
 
 /// <summary>

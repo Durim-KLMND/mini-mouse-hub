@@ -155,7 +155,11 @@ internal sealed class ViaDevice : ManagedDevice, IDisposable
         try { vendor = device.GetManufacturer(); } catch { }
         try { name = device.GetProductName(); } catch { }
         if (device.VendorID == 0x320F)
+        {
             vendor = "Glorious";
+            if (device.ProductID == 0x5044)
+                name = "GMMK Pro"; // stock firmware and QMK report it differently
+        }
         return (string.IsNullOrWhiteSpace(vendor) ? "Keyboard" : vendor.Trim(),
                 string.IsNullOrWhiteSpace(name) ? $"Keyboard {device.VendorID:X4}:{device.ProductID:X4}" : name.Trim());
     }
