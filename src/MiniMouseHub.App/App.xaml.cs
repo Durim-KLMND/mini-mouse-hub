@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 using MiniMouseHub.Core;
 
@@ -7,7 +8,10 @@ public partial class App : Application
 {
     private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(4);
 
+    private const string ShowWindowEventName = "MiniMouseHub.ShowWindow";
+
     private Mutex? _singleInstance;
+    private EventWaitHandle? _showWindowRequest;
     private DeviceMonitor? _monitor;
     private TrayIcon? _tray;
     private MainWindow? _window;
@@ -31,11 +35,13 @@ public partial class App : Application
         catch (AbandonedMutexException) { isFirst = true; }
         if (!isFirst)
         {
-            MessageBox.Show("Mini mouse hub is already running. Look for it in the system tray.", "Mini mouse hub");
+            // Ask the running copy to bring its window forward, then leave quietly.
+            AskRunningCopyToShowWindow();
             _singleInstance = null;
             Shutdown();
             return;
         }
+        ListenForShowWindowRequests();
 
         Task.Run(Updater.CleanUpOldVersion);
         StartWithWindows.RefreshPath();
@@ -156,6 +162,42 @@ public partial class App : Application
         _window.Activate();
     }
 
+    // A second launch sets this event instead of starting another copy.
+    private void ListenForShowWindowRequests()
+    {
+        _showWindowRequest = new EventWaitHandle(false, EventResetMode.AutoReset, ShowWindowEventName);
+        var request = _showWindowRequest;
+        new Thread(() =>
+        {
+            try
+            {
+                while (request.WaitOne())
+                    Dispatcher.BeginInvoke(ShowWindow);
+            }
+            catch (ObjectDisposedException) { }
+        }) { IsBackground = true, Name = "Show window requests" }.Start();
+    }
+
+    private static void AskRunningCopyToShowWindow()
+    {
+        try
+        {
+            // We were just launched, so we may bring a window to the front; let the running copy do it instead.
+            AllowSetForegroundWindow(AsfwAny);
+            using var request = new EventWaitHandle(false, EventResetMode.AutoReset, ShowWindowEventName);
+            request.Set();
+        }
+        catch (Exception)
+        {
+            // Nothing useful to do; the running copy is still in the tray.
+        }
+    }
+
+    private const int AsfwAny = -1;
+
+    [DllImport("user32.dll")]
+    private static extern bool AllowSetForegroundWindow(int processId);
+
     private void Quit()
     {
         _window?.AllowClose();
@@ -169,6 +211,7 @@ public partial class App : Application
     {
         _tray?.Dispose();
         _monitor?.Dispose();
+        _showWindowRequest?.Dispose();
         try { _singleInstance?.ReleaseMutex(); } catch (ApplicationException) { }
         _singleInstance?.Dispose();
         base.OnExit(e);
