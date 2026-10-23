@@ -15,6 +15,12 @@ Mini mouse hub is a small Windows app for checking and changing your gaming gear
 - Keeps its settings in a single file, `%LOCALAPPDATA%\MiniMouseHub\settings.json`, which you can back up to a secret gist by signing in to GitHub from Settings
 - Comes with `mmh`, a command-line tool for the same features
 
+## Install
+
+Download `MiniMouseHub-Setup.exe` from the [latest release](https://github.com/Durim-KLMND/mini-mouse-hub/releases/latest) and run it. It installs for your Windows account only, into `%LOCALAPPDATA%\Programs\Mini mouse hub`, so it doesn't need admin rights. It adds Mini mouse hub to the Start menu, can start it with Windows, and can be removed from Settings > Apps. The app needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0); the installer tells you if it's missing.
+
+Once installed, the app keeps itself up to date, so you only run the installer once.
+
 ## Supported devices
 
 | Device | Connection | What works | Status |
@@ -54,6 +60,7 @@ The project is early: the PRO X Superlight 2 is the only device tested so far.
 - `src/MiniMouseHub.Core`: the device library. `DeviceMonitor` runs one `DeviceProvider` per brand or protocol (`LogitechProvider` for HID++, `Via/ViaProvider` for QMK/VIA keyboards) and gives the app one brand-neutral `DeviceState` per device. To support a new brand, add a provider.
 - `src/MiniMouseHub.Cli`: `mmh`, a command-line tool for testing the library
 - `src/MiniMouseHub.App`: the Windows app (WPF): tiles for every connected device, a page per device with battery, DPI and lighting, settings, a tray icon, and notifications for low battery and DPI changes
+- `installer/MiniMouseHub.iss`: the Inno Setup script for the per-user installer
 - `tests/MiniMouseHub.Tests`: unit tests
 
 ## Build and run
@@ -85,7 +92,7 @@ Run it with `--minimized` to start straight in the tray.
 
 ## Releases and auto-update
 
-Every push to `main` runs `.github/workflows/release.yml`, which tests, builds `MiniMouseHub.exe`, and publishes it as a GitHub release tagged `v0.3.<run number>`. The app checks the latest release at startup and every 4 hours, and when it's newer, downloads it, swaps it in next to the running copy, and restarts. Automatic updates can be turned off in Settings.
+Every push to `main` runs `.github/workflows/release.yml`, which tests, builds `MiniMouseHub.exe`, and publishes it as a GitHub release tagged `v0.3.<run number>`, together with `MiniMouseHub-Setup.exe`, the installer built from `installer/MiniMouseHub.iss` with [Inno Setup](https://jrsoftware.org/isinfo.php). The app checks the latest release at startup and every 4 hours, and when it's newer, downloads it, swaps it in next to the running copy, and restarts. Automatic updates can be turned off in Settings.
 
 ## Glorious GMMK Pro
 

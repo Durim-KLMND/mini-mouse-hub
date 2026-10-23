@@ -1,7 +1,8 @@
 name: Release
 
-# Every push to main builds the app and publishes it as a GitHub release.
-# Installed copies of Mini mouse hub check the latest release and update themselves.
+# Every push to main builds the app and publishes it as a GitHub release, with two files:
+# MiniMouseHub.exe, which installed copies download to update themselves (Updater.cs), and
+# MiniMouseHub-Setup.exe, the per-user installer for new installs (installer/MiniMouseHub.iss).
 
 on:
   push:
@@ -34,7 +35,16 @@ jobs:
       - name: Publish
         run: dotnet publish src/MiniMouseHub.App -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:DebugType=none -p:Version=${{ env.VERSION }} -o publish
 
+      - name: Build installer
+        shell: pwsh
+        run: |
+          # Inno Setup from NuGet, pinned so the build doesn't change under us.
+          Invoke-WebRequest https://api.nuget.org/v3-flatcontainer/tools.innosetup/6.7.1/tools.innosetup.6.7.1.nupkg -OutFile inno.zip
+          Expand-Archive inno.zip inno
+          inno\tools\ISCC.exe /DAppVersion=${{ env.VERSION }} "/DSourceExe=$PWD\publish\MiniMouseHub.exe" "/O$PWD\publish" installer\MiniMouseHub.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "v${{ env.VERSION }}" publish/MiniMouseHub.exe --target "${{ github.sha }}" --title "Mini mouse hub ${{ env.VERSION }}" --generate-notes
+        run: gh release create "v${{ env.VERSION }}" publish/MiniMouseHub.exe publish/MiniMouseHub-Setup.exe --target "${{ github.sha }}" --title "Mini mouse hub ${{ env.VERSION }}" --generate-notes
