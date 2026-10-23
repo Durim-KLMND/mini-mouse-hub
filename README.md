@@ -3,13 +3,15 @@
 A lightweight alternative to Logitech G HUB for checking battery and changing mouse settings.
 It talks to Logitech devices directly over HID++ 2.0, through a Lightspeed receiver or a cable.
 
-Status: early. The `mmh` command-line tool can read battery, charging state and DPI, and set DPI.
+Status: early. The app and the `mmh` tool read battery, charging state and DPI, and set DPI (saved into the mouse's onboard profile).
 Tested target: PRO X Superlight 2 on a Lightspeed receiver.
 
 ## Layout
 
 - `src/MiniMouseHub.Core`: the HID++ library (device discovery, transport, battery, DPI)
 - `src/MiniMouseHub.Cli`: `mmh`, a command-line tool for testing the library
+- `src/MiniMouseHub.App`: the Windows app (WPF): a window with battery and DPI that hides to the system tray, with notifications for low battery and DPI changes
+- `tests/MiniMouseHub.Tests`: unit tests
 
 ## Build and run
 
@@ -29,3 +31,11 @@ To build a single Windows .exe that runs without .NET installed:
 ```
 dotnet publish src/MiniMouseHub.Cli -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -o publish
 ```
+
+To build the Windows app (about 0.5 MB; needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) on the PC that runs it):
+
+```
+dotnet publish src/MiniMouseHub.App -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o publish
+```
+
+Run it with `--minimized` to start straight in the tray.
