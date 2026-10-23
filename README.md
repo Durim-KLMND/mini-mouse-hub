@@ -1,5 +1,45 @@
 # Mini Mouse Hub
 
+Mini Mouse Hub is a small Windows app for checking and changing your gaming gear's settings without installing the manufacturer's software (such as Logitech G HUB). It talks to the devices directly, stays out of the way in the system tray, and changes are saved on the device itself, so they keep working on any PC.
+
+## What it does
+
+- Shows a tile for every connected device, with its battery level and whether it's charging
+- Reads and changes the mouse's DPI, including the onboard DPI slots
+- Warns you when the battery runs low (20%, 10% and 5%) and when the DPI is changed with the mouse's button
+- Runs in the tray, can start with Windows, and has light and dark themes
+- Updates itself from this repository's GitHub releases (can be turned off in Settings)
+- Comes with `mmh`, a command-line tool for the same features
+
+## Supported devices
+
+| Device | Connection | What works | Status |
+| --- | --- | --- | --- |
+| Logitech PRO X Superlight 2 | Lightspeed receiver or cable | Battery, charging, DPI and DPI slots, notifications | Supported and tested |
+| Other Logitech mice that speak HID++ 2.0 | Lightspeed receiver or cable | Battery and DPI, where the mouse offers them | Should work, not tested |
+| Glorious GMMK Pro keyboard (with QMK/VIA firmware) | Cable | Lighting | In progress |
+
+## Not supported yet
+
+These big gaming mouse brands don't work with Mini Mouse Hub so far:
+
+- Razer
+- SteelSeries
+- Corsair
+- Glorious (mice)
+- HyperX
+- ASUS ROG
+- Zowie (BenQ)
+- Roccat / Turtle Beach
+- Cooler Master
+- Pulsar
+- Finalmouse
+- Lamzu
+- Endgame Gear
+- Vaxee
+
+## Status
+
 A lightweight alternative to Logitech G HUB for checking battery and changing mouse settings.
 It talks to Logitech devices directly over HID++ 2.0, through a Lightspeed receiver or a cable, and to keyboards running QMK with VIA (any brand) over VIA's raw HID protocol.
 
