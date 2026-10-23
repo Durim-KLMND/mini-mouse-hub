@@ -1,12 +1,15 @@
 using System.Collections.Concurrent;
 using HidSharp;
-using MiniMouseHub.Core.Hidpp;
 
 namespace MiniMouseHub.Core;
 
-/// <summary>A snapshot of what the app knows about one Logitech device.</summary>
+/// <summary>A snapshot of what the app knows about one device, whatever its brand.</summary>
+/// <param name="Vendor">The brand, such as "Logitech" or "Glorious".</param>
+/// <param name="Lighting">The keyboard's RGB settings, when it has lighting the app can control.</param>
+/// <param name="Note">Something the user should know about this device, such as why its settings can't be changed.</param>
 public record DeviceState(
     string Id,
+    string Vendor,
     string Name,
     DeviceKind Kind,
     bool IsWired,
@@ -16,25 +19,46 @@ public record DeviceState(
     IReadOnlyList<int>? DpiSlots,
     int? ActiveDpiSlot,
     DpiCapabilities? DpiCapabilities,
-    OnboardMode? Mode)
+    OnboardMode? Mode,
+    LightingState? Lighting = null,
+    string? Note = null)
 {
     public bool HasDpi => DpiCapabilities != null;
+    public bool HasLighting => Lighting != null;
+
+    /// <summary>Brand and model, such as "Logitech PRO X Superlight 2", so devices can be told apart at a glance.</summary>
+    public string DisplayName => DeviceNames.Display(Vendor, Name);
+}
+
+/// <summary>Turns the names devices report into the names people know them by.</summary>
+public static class DeviceNames
+{
+    // Devices whose own name is shorter than their product name.
+    private static readonly Dictionary<string, string> Models = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["PRO X 2"] = "PRO X Superlight 2",
+        ["PRO X SUPERLIGHT"] = "PRO X Superlight",
+    };
+
+    public static string Display(string vendor, string name)
+    {
+        var model = Models.GetValueOrDefault(name.Trim(), name.Trim());
+        return model.StartsWith(vendor, StringComparison.OrdinalIgnoreCase) ? model : $"{vendor} {model}";
+    }
 }
 
 /// <summary>
-/// Finds every Logitech HID++ device (through receivers or cables), keeps track of them, polls
-/// their batteries, and listens for the notifications they send (DPI button presses, battery
-/// changes, sleep and wake). All device traffic runs on one background thread; events are raised
-/// from that thread.
+/// Finds every supported device, keeps track of them, polls them, and listens for the
+/// notifications they send. Each brand is handled by a <see cref="DeviceProvider"/>. All device
+/// traffic runs on one background thread; events are raised from that thread.
 /// </summary>
-public sealed class DeviceMonitor : IDisposable
+public sealed class DeviceMonitor : IDisposable, IDeviceHost
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(60);
 
     private readonly BlockingCollection<Action> _work = new();
     private readonly Thread _thread;
-    private readonly List<ChannelContext> _channels = new();
-    private readonly List<DeviceContext> _devices = new();
+    private readonly List<DeviceProvider> _providers;
     private volatile bool _disposed;
     private DateTime _nextPoll = DateTime.MinValue;
 
@@ -52,6 +76,7 @@ public sealed class DeviceMonitor : IDisposable
     public DeviceMonitor()
     {
         _thread = new Thread(Run) { IsBackground = true, Name = "Device monitor" };
+        _providers = [new LogitechProvider(this), new Via.ViaProvider(this)];
     }
 
     public void Start()
@@ -63,48 +88,31 @@ public sealed class DeviceMonitor : IDisposable
     /// <summary>Looks for new devices and re-reads everything.</summary>
     public void Refresh() => Enqueue(() =>
     {
-        Scan();
-        foreach (var device in _devices.ToList())
-            Try(device, () => RefreshAll(device));
+        foreach (var provider in _providers)
+            SafeRun(provider.Refresh);
     });
 
     /// <summary>
     /// Sets the DPI. When the device runs from its onboard profile, the value is saved into the
     /// profile's current DPI slot; otherwise it is set directly.
     /// </summary>
-    public Task SetDpiAsync(string deviceId, int dpi) => RunOnDevice(deviceId, device =>
-    {
-        var d = device.Device;
-        device.SuppressNextDpiEvent = true;
-        if (d.HasFeature(FeatureId.OnboardProfiles) && d.GetOnboardMode() == OnboardMode.Onboard)
-        {
-            var store = new OnboardProfileStore(d);
-            store.SetDpiInActiveProfile(store.GetCurrentDpiIndex(), dpi);
-        }
-        else
-        {
-            d.SetDpi(dpi);
-        }
-        RefreshDpi(device, raiseEvent: false);
-    });
+    public Task SetDpiAsync(string deviceId, int dpi) => RunOnDevice(deviceId, d => d.SetDpi(dpi));
 
     /// <summary>Switches to another DPI slot of the active onboard profile, like pressing the DPI button.</summary>
-    public Task SelectDpiSlotAsync(string deviceId, int slot) => RunOnDevice(deviceId, device =>
-    {
-        device.SuppressNextDpiEvent = true;
-        new OnboardProfileStore(device.Device).SetCurrentDpiIndex(slot);
-        RefreshDpi(device, raiseEvent: false);
-    });
+    public Task SelectDpiSlotAsync(string deviceId, int slot) => RunOnDevice(deviceId, d => d.SelectDpiSlot(slot));
 
-    private Task RunOnDevice(string deviceId, Action<DeviceContext> action)
+    /// <summary>Changes a keyboard's lighting and saves it on the keyboard.</summary>
+    public Task SetLightingAsync(string deviceId, LightingSettings lighting) => RunOnDevice(deviceId, d => d.SetLighting(lighting));
+
+    private Task RunOnDevice(string deviceId, Action<ManagedDevice> action)
     {
         var done = new TaskCompletionSource();
         Enqueue(() =>
         {
             try
             {
-                var device = _devices.FirstOrDefault(d => d.State.Id == deviceId)
-                    ?? throw new HidppException("That device isn't connected any more.");
+                var device = _providers.SelectMany(p => p.Devices).FirstOrDefault(d => d.State.Id == deviceId)
+                    ?? throw new InvalidOperationException("That device isn't connected any more.");
                 action(device);
                 done.SetResult();
             }
@@ -116,17 +124,23 @@ public sealed class DeviceMonitor : IDisposable
         return done.Task;
     }
 
-    private void Enqueue(Action action)
+    public void Enqueue(Action action)
     {
         try { _work.TryAdd(action); }
         catch (InvalidOperationException) { } // disposed
     }
 
-    private void OnUsbDevicesChanged(object? sender, DeviceListChangedEventArgs e) => Enqueue(Scan);
+    private void OnUsbDevicesChanged(object? sender, DeviceListChangedEventArgs e) => Enqueue(ScanAll);
+
+    private void ScanAll()
+    {
+        foreach (var provider in _providers)
+            SafeRun(provider.Scan);
+    }
 
     private void Run()
     {
-        SafeRun(Scan);
+        ScanAll();
         _nextPoll = DateTime.UtcNow + PollInterval;
         FirstScanCompleted?.Invoke();
         while (!_disposed)
@@ -141,257 +155,84 @@ public sealed class DeviceMonitor : IDisposable
             if (_disposed) break;
 
             _nextPoll = DateTime.UtcNow + PollInterval;
-            foreach (var device in _devices.ToList())
-            {
-                if (device.State.Awake)
-                    Try(device, () => RefreshBattery(device));
-                else
-                    Try(device, () => Wake(device));
-            }
+            foreach (var provider in _providers)
+                SafeRun(provider.Poll);
         }
     }
 
-    private void SafeRun(Action action)
+    private static void SafeRun(Action action)
     {
         try { action(); }
         catch (Exception) { }
     }
 
-    /// <summary>Runs device work, turning timeouts into "asleep" and I/O failures into a dropped receiver.</summary>
-    private void Try(DeviceContext device, Action action)
+    public void Publish()
     {
-        try
-        {
-            action();
-        }
-        catch (HidppTimeoutException)
-        {
-            Update(device, device.State with { Awake = false });
-        }
-        catch (HidppException)
-        {
-        }
-        catch (Exception)
-        {
-            DropChannel(device.Channel);
-        }
-    }
-
-    // ---- Discovery ----
-
-    private void Scan()
-    {
-        // Drop receivers that were unplugged.
-        var present = HidppDiscovery.FindHidppDevices();
-        var presentPaths = present.Select(g => g[0].DevicePath).ToHashSet();
-        foreach (var channel in _channels.Where(c => !presentPaths.Contains(c.Channel.DevicePath)).ToList())
-            DropChannel(channel);
-
-        foreach (var group in present)
-        {
-            if (_channels.Any(c => c.Channel.DevicePath == group[0].DevicePath))
-                continue;
-            HidppChannel opened;
-            try { opened = new HidppChannel(group); }
-            catch (Exception) { continue; }
-
-            var context = new ChannelContext(opened);
-            opened.ReportReceived += report => OnReport(context, report);
-            _channels.Add(context);
-            Enumerate(context);
-        }
-    }
-
-    /// <summary>Finds the devices behind a receiver (or the wired device itself) and adds any new ones.</summary>
-    private void Enumerate(ChannelContext channel)
-    {
-        List<LogitechDevice> found;
-        try { found = LogitechDevice.Enumerate(channel.Channel); }
-        catch (Exception) { return; }
-
-        foreach (var logi in found)
-        {
-            var id = $"{channel.Channel.DevicePath}#{logi.DeviceIndex}";
-            var existing = _devices.FirstOrDefault(d => d.State.Id == id);
-            if (existing != null)
-            {
-                existing.Device = logi;
-                Try(existing, () => RefreshAll(existing));
-                continue;
-            }
-
-            var device = new DeviceContext(channel, logi, new DeviceState(
-                id, "Logitech device", DeviceKind.Unknown, logi.IsWired, true, null, null, null, null, null, null));
-            _devices.Add(device);
-            Try(device, () => RefreshAll(device));
-        }
-        PublishList();
-    }
-
-    private void Wake(DeviceContext device)
-    {
-        // A cheap ping; if it answers, the device is back.
-        device.Channel.Channel.Request(device.Device.DeviceIndex, 0x00, 1, [0, 0, 0x5A], timeoutMs: 700);
-        RefreshAll(device);
-    }
-
-    private void DropChannel(ChannelContext channel)
-    {
-        _channels.Remove(channel);
-        _devices.RemoveAll(d => d.Channel == channel);
-        try { channel.Channel.Dispose(); } catch { }
-        PublishList();
-    }
-
-    // ---- Reading state ----
-
-    private void RefreshAll(DeviceContext device)
-    {
-        var d = device.Device;
-        device.DpiFeatureIndex = d.GetFeatureIndex(FeatureId.ExtendedAdjustableDpi) ?? d.GetFeatureIndex(FeatureId.AdjustableDpi);
-        device.BatteryFeatureIndex = d.GetFeatureIndex(FeatureId.UnifiedBattery)
-            ?? d.GetFeatureIndex(FeatureId.BatteryVoltage) ?? d.GetFeatureIndex(FeatureId.BatteryStatus);
-        device.OnboardFeatureIndex = d.GetFeatureIndex(FeatureId.OnboardProfiles);
-
-        var name = device.State.Name;
-        var kind = device.State.Kind;
-        if (d.HasFeature(FeatureId.DeviceName))
-        {
-            try { name = d.GetName(); } catch (HidppErrorException) { }
-            try { kind = d.GetKind(); } catch (HidppErrorException) { }
-        }
-
-        Update(device, device.State with
-        {
-            Name = name,
-            Kind = kind,
-            Awake = true,
-            DpiCapabilities = d.HasAdjustableDpi ? d.GetDpiCapabilities() : null,
-        });
-        if (device.BatteryFeatureIndex != null)
-            RefreshBattery(device);
-        RefreshDpi(device, raiseEvent: false);
-    }
-
-    private void RefreshBattery(DeviceContext device)
-    {
-        if (device.BatteryFeatureIndex == null) return;
-        Update(device, device.State with { Awake = true, Battery = device.Device.GetBattery() });
-    }
-
-    private void RefreshDpi(DeviceContext device, bool raiseEvent)
-    {
-        var d = device.Device;
-        if (!d.HasAdjustableDpi) return;
-        var old = device.State.Dpi;
-        var dpi = d.GetDpi().Current;
-
-        IReadOnlyList<int>? slots = null;
-        int? activeSlot = null;
-        OnboardMode? mode = null;
-        if (device.OnboardFeatureIndex != null)
-        {
-            mode = d.GetOnboardMode();
-            if (mode == OnboardMode.Onboard)
-            {
-                var store = new OnboardProfileStore(d);
-                var description = store.GetDescription();
-                var current = store.GetCurrentProfile();
-                var header = store.GetProfileHeaders(description).FirstOrDefault(h => h.Number == current);
-                if (header != null)
-                    slots = store.ReadProfile(header, description).DpiSlots.Where(v => v is not (0 or 0xFFFF)).ToArray();
-                activeSlot = store.GetCurrentDpiIndex();
-            }
-        }
-
-        var state = device.State with { Awake = true, Dpi = dpi, DpiSlots = slots, ActiveDpiSlot = activeSlot, Mode = mode };
-        Update(device, state);
-        if (raiseEvent && old is { } before && before != dpi && !device.SuppressNextDpiEvent)
-            DpiChangedOnDevice?.Invoke(state, before, dpi);
-        device.SuppressNextDpiEvent = false;
-    }
-
-    /// <summary>Runs on a HID reader thread: only decide what to re-read, never talk to the device here.</summary>
-    private void OnReport(ChannelContext channel, byte[] report)
-    {
-        if (report.Length < 5) return;
-
-        // Receiver notification 0x41: a paired device connected or disconnected (woke up or went to sleep).
-        if (report[0] == HidppConstants.ShortReportId && report[2] == 0x41)
-        {
-            var deviceIndex = report[1];
-            var linkLost = (report[4] & 0x40) != 0;
-            Enqueue(() =>
-            {
-                var device = _devices.FirstOrDefault(d => d.Channel == channel && d.Device.DeviceIndex == deviceIndex);
-                if (linkLost)
-                {
-                    if (device != null) Update(device, device.State with { Awake = false });
-                }
-                else if (device != null)
-                {
-                    Try(device, () => RefreshAll(device));
-                }
-                else
-                {
-                    Enumerate(channel); // a device we haven't seen yet
-                }
-            });
-            return;
-        }
-
-        if ((report[3] & 0x0F) != 0)
-            return; // a response to one of our requests, not an event
-
-        var index = report[1];
-        var feature = report[2];
-        Enqueue(() =>
-        {
-            // The device list belongs to the monitor thread, so look the device up there.
-            var target = _devices.FirstOrDefault(d => d.Channel == channel && d.Device.DeviceIndex == index);
-            if (target == null) return;
-            if (feature == target.DpiFeatureIndex || feature == target.OnboardFeatureIndex)
-                Try(target, () => RefreshDpi(target, raiseEvent: true));
-            else if (feature == target.BatteryFeatureIndex)
-                Try(target, () => RefreshBattery(target));
-        });
-    }
-
-    private void Update(DeviceContext device, DeviceState state)
-    {
-        if (state == device.State) return;
-        device.State = state;
-        PublishList();
-    }
-
-    private void PublishList()
-    {
-        Devices = _devices.Select(d => d.State).ToArray();
+        Devices = _providers.SelectMany(p => p.Devices).Select(d => d.State).ToArray();
         DevicesChanged?.Invoke(Devices);
     }
+
+    public void RaiseDpiChanged(DeviceState device, int before, int after) => DpiChangedOnDevice?.Invoke(device, before, after);
 
     public void Dispose()
     {
         _disposed = true;
         DeviceList.Local.Changed -= OnUsbDevicesChanged;
         _work.CompleteAdding();
-        foreach (var channel in _channels)
-            channel.Channel.Dispose();
+        foreach (var provider in _providers)
+            SafeRun(provider.Dispose);
     }
+}
 
-    private sealed class ChannelContext(HidppChannel channel)
-    {
-        public HidppChannel Channel { get; } = channel;
-    }
+/// <summary>What a <see cref="DeviceProvider"/> may ask of the monitor that owns it.</summary>
+public interface IDeviceHost
+{
+    /// <summary>Queues work for the monitor thread. Use it from HID reader threads.</summary>
+    void Enqueue(Action action);
 
-    private sealed class DeviceContext(ChannelContext channel, LogitechDevice device, DeviceState state)
+    /// <summary>Tells the app that the device list or a device's state changed.</summary>
+    void Publish();
+
+    void RaiseDpiChanged(DeviceState device, int before, int after);
+}
+
+/// <summary>
+/// Finds and talks to the devices of one brand or protocol. Every method runs on the monitor
+/// thread, so providers don't need locks.
+/// </summary>
+public abstract class DeviceProvider(IDeviceHost host) : IDisposable
+{
+    protected IDeviceHost Host { get; } = host;
+
+    public abstract IEnumerable<ManagedDevice> Devices { get; }
+
+    /// <summary>Adds devices that were plugged in and drops ones that were unplugged.</summary>
+    public abstract void Scan();
+
+    /// <summary>Called every minute: re-read anything the device doesn't report by itself.</summary>
+    public abstract void Poll();
+
+    /// <summary>Scans, then re-reads everything from every device.</summary>
+    public abstract void Refresh();
+
+    public virtual void Dispose() { }
+
+    protected void Update(ManagedDevice device, DeviceState state)
     {
-        public ChannelContext Channel { get; } = channel;
-        public LogitechDevice Device { get; set; } = device;
-        public DeviceState State { get; set; } = state;
-        public byte? DpiFeatureIndex { get; set; }
-        public byte? BatteryFeatureIndex { get; set; }
-        public byte? OnboardFeatureIndex { get; set; }
-        public bool SuppressNextDpiEvent { get; set; }
+        if (state == device.State) return;
+        device.State = state;
+        Host.Publish();
     }
+}
+
+/// <summary>One connected device. Settings it doesn't support throw <see cref="NotSupportedException"/>.</summary>
+public abstract class ManagedDevice(DeviceState state)
+{
+    public DeviceState State { get; set; } = state;
+
+    public virtual void SetDpi(int dpi) => throw new NotSupportedException($"{State.Name} has no adjustable DPI.");
+
+    public virtual void SelectDpiSlot(int slot) => throw new NotSupportedException($"{State.Name} has no DPI slots.");
+
+    public virtual void SetLighting(LightingSettings lighting) => throw new NotSupportedException($"{State.Name}'s lighting can't be changed.");
 }

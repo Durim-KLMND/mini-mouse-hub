@@ -53,7 +53,7 @@ public partial class App : Application
         _monitor.DpiChangedOnDevice += (device, before, after) => Dispatcher.BeginInvoke(() =>
         {
             if (_settings.DpiNotifications)
-                _tray.Notify($"{device.Name}: DPI changed", $"{before} → {after} DPI");
+                _tray.Notify($"{device.DisplayName}: DPI changed", $"{before} → {after} DPI");
         });
 
         if (!e.Args.Contains("--minimized"))
@@ -79,7 +79,7 @@ public partial class App : Application
             if (!_lowBattery.TryGetValue(device.Id, out var alert))
                 _lowBattery[device.Id] = alert = new LowBatteryAlert(20, 10, 5);
             if (alert.Check(battery) is { } threshold && _settings.LowBatteryNotifications)
-                _tray?.Notify($"{device.Name}: battery low", $"{battery.Percent}% left. Time to charge it soon.", warning: threshold <= 10);
+                _tray?.Notify($"{device.DisplayName}: battery low", $"{battery.Percent}% left. Time to charge it soon.", warning: threshold <= 10);
         }
     }
 

@@ -17,7 +17,7 @@ public static class DeviceArt
 {
     public static FrameworkElement For(DeviceState device)
     {
-        var custom = LoadCustomImage(device.Name);
+        var custom = LoadCustomImage(device.Name) ?? LoadCustomImage(device.DisplayName);
         if (custom != null)
             return new Image { Source = custom, Stretch = Stretch.Uniform };
 

@@ -77,9 +77,18 @@ internal static class Ui
         DeviceKind.SteeringWheel => "Wheel",
         _ => kind.ToString(),
     };
+
+    /// <summary>For example "Mouse · Wireless" or "Keyboard · connected by cable".</summary>
+    public static string Describe(DeviceState device, bool longForm = false)
+    {
+        var connection = longForm
+            ? (device.IsWired ? "connected by cable" : "wireless")
+            : (device.IsWired ? "Cable" : "Wireless");
+        return $"{KindName(device.Kind)} · {connection}";
+    }
 }
 
-/// <summary>The start screen: a tile for each connected Logitech device.</summary>
+/// <summary>The start screen: a tile for each connected device.</summary>
 internal static class HomePage
 {
     public static UIElement Build(IReadOnlyList<DeviceState> devices, bool firstScanDone, Action<DeviceState> open)
@@ -91,13 +100,13 @@ internal static class HomePage
         if (devices.Count == 0)
         {
             panel.Children.Add(Ui.Text(firstScanDone
-                ? "No Logitech devices found. Plug in a Lightspeed receiver or a cable, move the mouse to wake it, and make sure G HUB is closed."
-                : "Looking for Logitech devices…", 14, "Muted"));
+                ? "No devices found. Plug in a Lightspeed receiver, a cable or a VIA keyboard, move the mouse to wake it, and make sure G HUB is closed."
+                : "Looking for devices…", 14, "Muted"));
             return panel;
         }
 
         var tiles = new WrapPanel();
-        foreach (var device in devices.OrderBy(d => d.Kind).ThenBy(d => d.Name))
+        foreach (var device in devices.OrderBy(d => d.Kind).ThenBy(d => d.DisplayName))
             tiles.Children.Add(Tile(device, open));
         panel.Children.Add(tiles);
         return panel;
@@ -116,10 +125,8 @@ internal static class HomePage
 
         var info = new StackPanel();
         Grid.SetRow(info, 1);
-        info.Children.Add(Ui.Text(device.Name, 15, weight: FontWeights.SemiBold));
-        var status = device.Awake
-            ? $"{Ui.KindName(device.Kind)} · {(device.IsWired ? "Cable" : "Wireless")}"
-            : "Asleep. Move it to wake it";
+        info.Children.Add(Ui.Text(device.DisplayName, 15, weight: FontWeights.SemiBold));
+        var status = device.Awake ? Ui.Describe(device) : "Asleep. Move it to wake it";
         info.Children.Add(Ui.Text(status, 12, "Muted"));
 
         if (device.Battery != null)
@@ -136,6 +143,7 @@ internal static class HomePage
             row.Children.Add(pct);
             info.Children.Add(row);
         }
+        content.Children.Add(info);
 
         var tile = new Button { Style = (Style)Application.Current.Resources["Tile"], Content = content };
         tile.Click += (_, _) => open(device);
@@ -161,6 +169,10 @@ internal sealed class DevicePage
     private readonly Button _apply = new() { Content = "Apply", Margin = new Thickness(8, 0, 0, 0), Style = (Style)Application.Current.Resources["PrimaryButton"] };
     private readonly TextBlock _dpiHint = Ui.Text("", 12, "Muted");
     private readonly Border _dpiCard;
+    private readonly Border _batteryCard;
+    private readonly TextBlock _note = Ui.Text("", 13);
+    private readonly Border _noteCard;
+    private readonly LightingCard _lighting;
 
     public UIElement Root { get; }
 
@@ -200,7 +212,10 @@ internal sealed class DevicePage
         batteryRow.Children.Add(_charging);
         battery.Children.Add(batteryRow);
         battery.Children.Add(_batteryBar);
-        right.Children.Add(Ui.Card(battery));
+        _noteCard = Ui.Card(_note);
+        right.Children.Add(_noteCard);
+        _batteryCard = Ui.Card(battery);
+        right.Children.Add(_batteryCard);
 
         var dpi = new StackPanel();
         dpi.Children.Add(Ui.Label("DPI"));
@@ -221,6 +236,8 @@ internal sealed class DevicePage
         dpi.Children.Add(_dpiHint);
         _dpiCard = Ui.Card(dpi);
         right.Children.Add(_dpiCard);
+        _lighting = new LightingCard(monitor, device);
+        right.Children.Add(_lighting.Root);
 
         layout.Children.Add(right);
         Root = layout;
@@ -236,8 +253,15 @@ internal sealed class DevicePage
         _art.Opacity = device.Awake ? 1 : 0.45;
 
         _status.Text = device.Awake
-            ? $"{Ui.KindName(device.Kind)} · {(device.IsWired ? "connected by cable" : "wireless")}"
+            ? Ui.Describe(device, longForm: true)
             : "Asleep or switched off. Move it to wake it.";
+
+        _noteCard.Visibility = device.Note != null ? Visibility.Visible : Visibility.Collapsed;
+        _note.Text = device.Note ?? "";
+        _lighting.Update(device);
+
+        // A wired device without a battery reading has no battery; a wireless one may just be asleep.
+        _batteryCard.Visibility = device.Battery != null || !device.IsWired ? Visibility.Visible : Visibility.Collapsed;
 
         _batteryPercent.Text = Ui.BatteryText(device.Battery);
         _charging.Text = device.Battery != null ? Ui.ChargingText(device.Battery) : "Not reported by this device";
@@ -322,6 +346,164 @@ internal sealed class DevicePage
     {
         _dpiHint.Text = text;
         _dpiHint.Tag = "message"; // keep it until the page is reopened
+    }
+}
+
+/// <summary>RGB controls for a keyboard. Changes are sent shortly after the user stops dragging, then saved on the keyboard.</summary>
+internal sealed class LightingCard
+{
+    private static readonly TimeSpan SendDelay = TimeSpan.FromMilliseconds(300);
+
+    private readonly DeviceMonitor _monitor;
+    private DeviceState _device;
+    private readonly CheckBox _on = new() { Content = "Lights on" };
+    private readonly ComboBox _effect = new() { Margin = new Thickness(0, 4, 0, 0), Padding = new Thickness(8, 5, 8, 5) };
+    private readonly Slider _brightness = NewSlider();
+    private readonly Slider _speed = NewSlider();
+    private readonly Slider _hue = NewSlider();
+    private readonly Slider _saturation = NewSlider();
+    private readonly Border _swatch = new() { Width = 28, Height = 28, CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1) };
+    private readonly TextBlock _hint = Ui.Text("", 12, "Muted");
+    private readonly System.Windows.Threading.DispatcherTimer _sendTimer = new() { Interval = SendDelay };
+    private IReadOnlyList<string>? _effectNames;
+    private bool _updating;
+    private bool _pending;
+
+    public Border Root { get; }
+
+    public LightingCard(DeviceMonitor monitor, DeviceState device)
+    {
+        _monitor = monitor;
+        _device = device;
+
+        var panel = new StackPanel();
+        panel.Children.Add(Ui.Label("LIGHTING"));
+        panel.Children.Add(_on);
+        panel.Children.Add(Row("Effect", _effect));
+        panel.Children.Add(Row("Brightness", _brightness));
+        panel.Children.Add(Row("Speed", _speed));
+        var colorRow = new Grid();
+        colorRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        colorRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var sliders = new StackPanel();
+        sliders.Children.Add(Row("Color", _hue));
+        sliders.Children.Add(Row("Saturation", _saturation));
+        colorRow.Children.Add(sliders);
+        _swatch.Margin = new Thickness(16, 0, 0, 0);
+        _swatch.VerticalAlignment = VerticalAlignment.Center;
+        _swatch.BorderBrush = Res("Border");
+        Grid.SetColumn(_swatch, 1);
+        colorRow.Children.Add(_swatch);
+        panel.Children.Add(colorRow);
+        _hint.Margin = new Thickness(0, 10, 0, 0);
+        panel.Children.Add(_hint);
+        Root = Ui.Card(panel);
+
+        _on.Checked += (_, _) => Changed();
+        _on.Unchecked += (_, _) => Changed();
+        _effect.SelectionChanged += (_, _) => Changed();
+        foreach (var slider in new[] { _brightness, _speed, _hue, _saturation })
+            slider.ValueChanged += (_, _) => Changed();
+        _sendTimer.Tick += async (_, _) => await Send();
+
+        Update(device);
+    }
+
+    private static Slider NewSlider() => new() { Minimum = 0, Maximum = 255, SmallChange = 1, LargeChange = 16, IsMoveToPointEnabled = true };
+
+    private static StackPanel Row(string label, FrameworkElement control)
+    {
+        var row = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
+        row.Children.Add(Ui.Text(label, 12, "Muted"));
+        row.Children.Add(control);
+        return row;
+    }
+
+    public void Update(DeviceState device)
+    {
+        _device = device;
+        Root.Visibility = device.Lighting != null ? Visibility.Visible : Visibility.Collapsed;
+        if (device.Lighting is not { } lighting || _pending)
+            return; // don't fight the user while their change is on its way
+
+        _updating = true;
+        if (!ReferenceEquals(_effectNames, lighting.EffectNames))
+        {
+            _effectNames = lighting.EffectNames;
+            _effect.ItemsSource = lighting.EffectNames;
+        }
+        var settings = lighting.Settings;
+        _on.IsChecked = !settings.IsOff;
+        if (!settings.IsOff)
+            _effect.SelectedIndex = Math.Clamp(settings.Effect - 1, 0, lighting.EffectNames.Count - 1);
+        else if (_effect.SelectedIndex < 0)
+            _effect.SelectedIndex = 0;
+        _brightness.Value = settings.Brightness;
+        _speed.Value = settings.Speed;
+        _hue.Value = settings.Hue;
+        _saturation.Value = settings.Saturation;
+        _updating = false;
+        RefreshControls();
+    }
+
+    private void Changed()
+    {
+        RefreshControls();
+        if (_updating) return;
+        _pending = true;
+        _sendTimer.Stop();
+        _sendTimer.Start();
+    }
+
+    private void RefreshControls()
+    {
+        var on = _on.IsChecked == true;
+        foreach (var control in new Control[] { _effect, _brightness, _speed, _hue, _saturation })
+            control.IsEnabled = on;
+        _swatch.Background = new SolidColorBrush(FromHsv(_hue.Value / 255 * 360, _saturation.Value / 255, 1));
+    }
+
+    private LightingSettings Current() => new(
+        Effect: _on.IsChecked == true ? Math.Max(_effect.SelectedIndex, 0) + 1 : 0,
+        Brightness: (int)Math.Round(_brightness.Value),
+        Speed: (int)Math.Round(_speed.Value),
+        Hue: (int)Math.Round(_hue.Value),
+        Saturation: (int)Math.Round(_saturation.Value));
+
+    private async Task Send()
+    {
+        _sendTimer.Stop();
+        try
+        {
+            await _monitor.SetLightingAsync(_device.Id, Current());
+            _hint.Text = "Saved on the keyboard.";
+        }
+        catch (Exception ex)
+        {
+            _hint.Text = $"Couldn't change the lighting: {ex.Message}";
+        }
+        finally
+        {
+            if (!_sendTimer.IsEnabled)
+                _pending = false;
+        }
+    }
+
+    private static Color FromHsv(double hue, double saturation, double value)
+    {
+        var c = value * saturation;
+        var x = c * (1 - Math.Abs(hue / 60 % 2 - 1));
+        var m = value - c;
+        var (r, g, b) = (hue % 360) switch
+        {
+            < 60 => (c, x, 0d),
+            < 120 => (x, c, 0d),
+            < 180 => (0d, c, x),
+            < 240 => (0d, x, c),
+            < 300 => (x, 0d, c),
+            _ => (c, 0d, x),
+        };
+        return Color.FromRgb((byte)((r + m) * 255), (byte)((g + m) * 255), (byte)((b + m) * 255));
     }
 }
 

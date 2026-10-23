@@ -99,7 +99,7 @@ public partial class MainWindow : Window
         _page = PageKind.Device;
         _deviceId = device.Id;
         BackButton.Visibility = Visibility.Visible;
-        TitleText.Text = device.Name;
+        TitleText.Text = device.DisplayName;
         _devicePage = new DevicePage(_monitor, device);
         Page.Content = _devicePage.Root;
     }
