@@ -104,26 +104,17 @@ void PrintDevice(LogitechDevice device, bool includeFeatures)
         Console.WriteLine($"  Battery:  unavailable ({e.Message})");
     }
 
-    if (device.HasFeature(FeatureId.AdjustableDpi))
+    if (device.HasAdjustableDpi)
     {
         try
         {
-            var sensors = device.GetDpiSensorCount();
-            for (byte s = 0; s < sensors; s++)
-            {
-                var dpi = device.GetDpi(s);
-                var label = sensors > 1 ? $"DPI (sensor {s})" : "DPI";
-                Console.WriteLine($"  {label}:      {dpi.Current} (default {dpi.Default}, allowed {dpi.Capabilities})");
-            }
+            var dpi = device.GetDpi();
+            Console.WriteLine($"  DPI:      {dpi.Current} (default {dpi.Default}, allowed {dpi.Capabilities})");
         }
         catch (HidppException e)
         {
             Console.WriteLine($"  DPI:      unavailable ({e.Message})");
         }
-    }
-    else if (device.HasFeature(FeatureId.ExtendedAdjustableDpi))
-    {
-        Console.WriteLine("  DPI:      uses Extended adjustable DPI (0x2202), not supported yet");
     }
     else
     {
@@ -152,7 +143,7 @@ int SetDpi(List<LogitechDevice> devices, string? value)
         Console.WriteLine("Usage: mmh dpi <value>, for example: mmh dpi 1600");
         return 2;
     }
-    var mouse = devices.FirstOrDefault(d => d.HasFeature(FeatureId.AdjustableDpi));
+    var mouse = devices.FirstOrDefault(d => d.HasAdjustableDpi);
     if (mouse == null)
     {
         Console.WriteLine("No device with adjustable DPI found.");

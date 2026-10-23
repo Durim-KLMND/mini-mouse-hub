@@ -212,46 +212,88 @@ public sealed class LogitechDevice
     };
 
     // ---- DPI ----
+    // Older mice use Adjustable DPI (0x2201); newer ones such as the PRO X Superlight 2 use
+    // Extended adjustable DPI (0x2202), which adds separate X/Y values and lift-off distance.
+    // Only one sensor (index 0) is used; Logitech mice have a single sensor.
 
-    public int GetDpiSensorCount() => Call(FeatureId.AdjustableDpi, 0)[0];
+    public bool HasAdjustableDpi => HasFeature(FeatureId.ExtendedAdjustableDpi) || HasFeature(FeatureId.AdjustableDpi);
 
-    public DpiInfo GetDpi(byte sensorIndex = 0)
+    public DpiInfo GetDpi()
     {
-        // Function 2 = getSensorDpi(sensor) -> [sensor, dpi (2 bytes), default dpi (2 bytes)]
-        var r = Call(FeatureId.AdjustableDpi, 2, sensorIndex);
-        var current = (r[1] << 8) | r[2];
-        var defaultDpi = (r[3] << 8) | r[4];
-        return new DpiInfo(sensorIndex, current, defaultDpi, GetDpiCapabilities(sensorIndex));
-    }
-
-    public DpiCapabilities GetDpiCapabilities(byte sensorIndex = 0)
-    {
-        // Function 1 = getSensorDpiList(sensor) -> [sensor, then 2-byte values ending in 0].
-        // A value with the top 3 bits set (0xE000) is a step size between the values around it.
-        var r = Call(FeatureId.AdjustableDpi, 1, sensorIndex);
-        var raw = new List<int>();
-        for (var i = 1; i + 1 < r.Length; i += 2)
+        if (HasFeature(FeatureId.ExtendedAdjustableDpi))
         {
-            var value = (r[i] << 8) | r[i + 1];
-            if (value == 0) break;
-            raw.Add(value);
+            var p = ReadExtendedDpiParameters();
+            return new DpiInfo(0, p.X, p.DefaultX, GetDpiCapabilities());
         }
 
-        var stepIndex = raw.FindIndex(v => (v & 0xE000) == 0xE000);
-        if (stepIndex > 0 && stepIndex + 1 < raw.Count)
-        {
-            var min = raw[stepIndex - 1];
-            var step = raw[stepIndex] & 0x1FFF;
-            var max = raw[stepIndex + 1];
-            return new DpiCapabilities([], min, max, step);
-        }
-        return new DpiCapabilities(raw, null, null, null);
+        // 0x2201 function 2 = getSensorDpi(sensor) -> [sensor, dpi (2 bytes), default dpi (2 bytes)]
+        var r = Call(FeatureId.AdjustableDpi, 2, 0);
+        return new DpiInfo(0, (r[1] << 8) | r[2], (r[3] << 8) | r[4], GetDpiCapabilities());
     }
 
-    public int SetDpi(int dpi, byte sensorIndex = 0)
+    public DpiCapabilities GetDpiCapabilities()
     {
-        // Function 3 = setSensorDpi(sensor, dpi) -> echoes [sensor, dpi]
-        var r = Call(FeatureId.AdjustableDpi, 3, sensorIndex, (byte)(dpi >> 8), (byte)dpi);
+        var values = new List<int>();
+        if (HasFeature(FeatureId.ExtendedAdjustableDpi))
+        {
+            // 0x2202 function 2 = getSensorDpiRanges(sensor, direction, page) -> [sensor, direction, page, values...].
+            // The list can span several pages and ends with a 0 value.
+            for (byte page = 0; page < 16; page++)
+            {
+                var r = Call(FeatureId.ExtendedAdjustableDpi, 2, 0, 0, page);
+                if (ReadDpiValues(r, 3, values))
+                    break;
+            }
+        }
+        else
+        {
+            // 0x2201 function 1 = getSensorDpiList(sensor) -> [sensor, values...]
+            ReadDpiValues(Call(FeatureId.AdjustableDpi, 1, 0), 1, values);
+        }
+        return DpiCapabilities.Parse(values);
+    }
+
+    /// <summary>Appends 2-byte values from a reply; returns true when the 0 terminator was reached.</summary>
+    private static bool ReadDpiValues(byte[] reply, int offset, List<int> values)
+    {
+        for (var i = offset; i + 1 < reply.Length; i += 2)
+        {
+            var value = (reply[i] << 8) | reply[i + 1];
+            if (value == 0) return true;
+            values.Add(value);
+        }
+        return false;
+    }
+
+    /// <summary>Sets the DPI and returns the value the mouse reports back.</summary>
+    public int SetDpi(int dpi)
+    {
+        if (HasFeature(FeatureId.ExtendedAdjustableDpi))
+        {
+            // Function 6 = setSensorDpiParameters(sensor, dpi X, dpi Y, lift-off distance).
+            // Y is only used when the sensor supports separate X/Y; keep the current lift-off distance.
+            var capabilities = Call(FeatureId.ExtendedAdjustableDpi, 1, 0);
+            var separateY = (capabilities[2] & 0x01) != 0;
+            var current = ReadExtendedDpiParameters();
+            var y = separateY ? dpi : 0;
+            Call(FeatureId.ExtendedAdjustableDpi, 6, 0, (byte)(dpi >> 8), (byte)dpi, (byte)(y >> 8), (byte)y, current.LiftOffDistance);
+            return ReadExtendedDpiParameters().X;
+        }
+
+        // 0x2201 function 3 = setSensorDpi(sensor, dpi) -> echoes [sensor, dpi]
+        var r = Call(FeatureId.AdjustableDpi, 3, 0, (byte)(dpi >> 8), (byte)dpi);
         return (r[1] << 8) | r[2];
+    }
+
+    private record ExtendedDpiParameters(int X, int DefaultX, int Y, int DefaultY, byte LiftOffDistance);
+
+    private ExtendedDpiParameters ReadExtendedDpiParameters()
+    {
+        // Function 5 = getSensorDpiParameters(sensor) -> [sensor, X, default X, Y, default Y (2 bytes each), lift-off distance]
+        var r = Call(FeatureId.ExtendedAdjustableDpi, 5, 0);
+        int U16(int i) => (r[i] << 8) | r[i + 1];
+        var defaultX = U16(3);
+        var x = U16(1) == 0 ? defaultX : U16(1);
+        return new ExtendedDpiParameters(x, defaultX, U16(5), U16(7), r[9]);
     }
 }
