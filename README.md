@@ -12,7 +12,7 @@ Mini mouse hub is a small Windows app for checking and changing your gaming gear
 - Warns you when the battery runs low (20%, 10% and 5%) and when the DPI is changed with the mouse's button
 - Runs in the tray, can start with Windows, and has light and dark themes
 - Updates itself from this repository's GitHub releases (can be turned off in Settings)
-- Keeps its settings in a single file, `%LOCALAPPDATA%\MiniMouseHub\settings.json`, which you can back up to a secret gist by signing in to GitHub from Settings
+- Keeps its settings in a single file, `%LOCALAPPDATA%\MiniMouseHub\settings.json`, which syncs to your GitHub account automatically once you sign in with GitHub in Settings
 - Comes with `mmh`, a command-line tool for the same features
 
 ## Supported devices
