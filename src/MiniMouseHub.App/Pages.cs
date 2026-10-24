@@ -552,7 +552,7 @@ internal static class SettingsPage
             appearance.Children.Add(option);
         }
         var trayBattery = Toggle("Show the battery level in the tray icon", settings.TrayShowsBattery, on => { settings.TrayShowsBattery = on; settings.Save(); });
-        trayBattery.Margin = new Thickness(0, 14, 0, 0);
+        trayBattery.Margin = new Thickness(0, 8, 0, 0);
         appearance.Children.Add(trayBattery);
         appearance.Children.Add(Ui.Text("When this is off, the tray shows the Mini mouse hub icon. Hover it to see the battery.", 12, "Muted"));
         panel.Children.Add(Ui.Card(appearance));
