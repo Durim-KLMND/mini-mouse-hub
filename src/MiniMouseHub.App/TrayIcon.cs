@@ -12,10 +12,15 @@ public sealed class TrayIcon : IDisposable
 {
     private readonly NotifyIcon _icon;
     private Icon? _currentIcon;
+    private Icon? _appIcon;
     private string _iconKey = "";
+    private int? _percent;
+    private bool _charging;
+    private bool _showBattery = true;
 
-    public TrayIcon(Action open, Action quit)
+    public TrayIcon(Action open, Action quit, bool showBattery)
     {
+        _showBattery = showBattery;
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open Mini mouse hub", null, (_, _) => open());
         menu.Items.Add(new ToolStripSeparator());
@@ -32,15 +37,28 @@ public sealed class TrayIcon : IDisposable
             if (e.Button == MouseButtons.Left) open();
         };
         _icon.BalloonTipClicked += (_, _) => open();
-        SetIcon(null, false);
+        RefreshIcon();
+    }
+
+    /// <summary>Whether the icon shows the battery level or the app icon.</summary>
+    public bool ShowBattery
+    {
+        get => _showBattery;
+        set
+        {
+            if (_showBattery == value) return;
+            _showBattery = value;
+            RefreshIcon();
+        }
     }
 
     /// <summary>Shows the battery of the first mouse (or else the first device with a battery) and lists all devices in the tooltip.</summary>
     public void Update(IReadOnlyList<DeviceState> devices)
     {
         var main = devices.Where(d => d.Battery != null).OrderBy(d => d.Kind == DeviceKind.Mouse ? 0 : 1).FirstOrDefault();
-        var percent = main is { Awake: true } ? main.Battery?.Percent : null;
-        SetIcon(percent, main?.Battery?.IsCharging == true);
+        _percent = main is { Awake: true } ? main.Battery?.Percent : null;
+        _charging = main?.Battery?.IsCharging == true;
+        RefreshIcon();
 
         var lines = devices.Count == 0
             ? ["No devices found"]
@@ -54,8 +72,31 @@ public sealed class TrayIcon : IDisposable
     public void Notify(string title, string text, bool warning = false) =>
         _icon.ShowBalloonTip(5000, title, text, warning ? ToolTipIcon.Warning : ToolTipIcon.Info);
 
+    private void RefreshIcon()
+    {
+        if (_showBattery)
+        {
+            SetBatteryIcon(_percent, _charging);
+            return;
+        }
+        if (_iconKey == "app") return;
+        _iconKey = "app";
+        _appIcon ??= LoadAppIcon();
+        _icon.Icon = _appIcon;
+        _currentIcon?.Dispose();
+        _currentIcon = null;
+    }
+
+    /// <summary>The program's icon, at the size Windows uses in the tray.</summary>
+    private static Icon LoadAppIcon()
+    {
+        var resource = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Assets/app.ico"));
+        using var stream = resource!.Stream;
+        return new Icon(stream, SystemInformation.SmallIconSize);
+    }
+
     /// <summary>Draws the battery percentage into the tray icon.</summary>
-    private void SetIcon(int? percent, bool charging)
+    private void SetBatteryIcon(int? percent, bool charging)
     {
         var key = $"{percent}|{charging}";
         if (key == _iconKey) return;
@@ -111,5 +152,6 @@ public sealed class TrayIcon : IDisposable
         _icon.Visible = false;
         _icon.Dispose();
         _currentIcon?.Dispose();
+        _appIcon?.Dispose();
     }
 }

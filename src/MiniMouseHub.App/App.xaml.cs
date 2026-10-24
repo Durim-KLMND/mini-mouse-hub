@@ -56,7 +56,12 @@ public partial class App : Application
             _window?.Redraw();
         };
         _window = new MainWindow(_monitor, _settings, CheckForUpdatesFromSettings, _sync);
-        _tray = new TrayIcon(ShowWindow, Quit);
+        _tray = new TrayIcon(ShowWindow, Quit, _settings.TrayShowsBattery);
+        // Covers both the Settings page and settings pulled from GitHub.
+        AppSettings.Saved += () => Dispatcher.BeginInvoke(() =>
+        {
+            if (_tray != null) _tray.ShowBattery = _settings.TrayShowsBattery;
+        });
 
         _monitor.DevicesChanged += devices => Dispatcher.BeginInvoke(() => OnDevicesChanged(devices));
         _monitor.FirstScanCompleted += () => Dispatcher.BeginInvoke(() =>
