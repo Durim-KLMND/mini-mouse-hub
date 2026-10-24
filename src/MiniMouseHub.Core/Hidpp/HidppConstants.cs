@@ -22,6 +22,16 @@ public static class HidppConstants
     /// <summary>Sub-ID byte that marks a HID++ 1.0 error response (sent by receivers).</summary>
     public const byte Hidpp10ErrorMarker = 0x8F;
 
+    /// <summary>HID++ 1.0 sub-IDs for reading and writing a receiver's short registers.</summary>
+    public const byte SetShortRegister = 0x80;
+    public const byte GetShortRegister = 0x81;
+
+    /// <summary>Receiver register holding which notifications it sends to the computer.</summary>
+    public const byte NotificationFlagsRegister = 0x00;
+
+    /// <summary>Bit in the middle byte of <see cref="NotificationFlagsRegister"/>: send 0x41 messages when a paired device connects or disconnects.</summary>
+    public const byte WirelessNotificationsFlag = 0x01;
+
     /// <summary>Software ID put in our requests so responses can be told apart from notifications (which use 0).</summary>
     public const byte SoftwareId = 0x0A;
 }

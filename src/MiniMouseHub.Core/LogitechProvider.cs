@@ -11,6 +11,12 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
     private readonly List<ChannelContext> _channels = new();
     private readonly List<DeviceContext> _devices = new();
 
+    // How often a sleeping device is pinged, in case the receiver doesn't say when it wakes up.
+    private static readonly TimeSpan WakeProbeInterval = TimeSpan.FromSeconds(4);
+
+    // A device that just reconnected may not answer straight away.
+    private static readonly TimeSpan SettleDelay = TimeSpan.FromMilliseconds(400);
+
     public override IEnumerable<ManagedDevice> Devices => _devices;
 
     public override void Refresh()
@@ -40,7 +46,7 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
         }
         catch (HidppTimeoutException)
         {
-            Update(device, device.State with { Awake = false });
+            MarkAsleep(device);
         }
         catch (HidppException)
         {
@@ -73,6 +79,30 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
             opened.ReportReceived += report => OnReport(context, report);
             _channels.Add(context);
             Enumerate(context);
+            EnableConnectionNotifications(context);
+        }
+    }
+
+    /// <summary>
+    /// Asks a receiver to tell us when its devices connect and disconnect (notification 0x41), so a
+    /// device that wakes up is seen right away. Receivers only send these when the flag is set, and
+    /// it is cleared whenever the receiver is plugged in again.
+    /// </summary>
+    private void EnableConnectionNotifications(ChannelContext channel)
+    {
+        if (_devices.Any(d => d.Channel == channel && d.Device.IsWired))
+            return;
+        try
+        {
+            var flags = channel.Channel.ReadRegister(HidppConstants.WiredDeviceIndex, HidppConstants.NotificationFlagsRegister);
+            if ((flags[1] & HidppConstants.WirelessNotificationsFlag) != 0)
+                return;
+            flags[1] |= HidppConstants.WirelessNotificationsFlag;
+            channel.Channel.WriteRegister(HidppConstants.WiredDeviceIndex, HidppConstants.NotificationFlagsRegister, flags);
+        }
+        catch (Exception)
+        {
+            // Not a receiver, or one that doesn't have the register. The wake probe still covers it.
         }
     }
 
@@ -101,6 +131,31 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
         }
         Host.Publish();
     }
+
+    /// <summary>Marks a device asleep, keeping what we last read from it, and starts checking for it to wake up.</summary>
+    private void MarkAsleep(DeviceContext device)
+    {
+        Update(device, device.State with { Awake = false });
+        ScheduleWakeProbe(device);
+    }
+
+    private void ScheduleWakeProbe(DeviceContext device)
+    {
+        if (device.WakeProbeScheduled) return;
+        device.WakeProbeScheduled = true;
+        After(WakeProbeInterval, () =>
+        {
+            device.WakeProbeScheduled = false;
+            if (!_devices.Contains(device) || device.State.Awake) return;
+            Try(device, () => Wake(device));
+            if (_devices.Contains(device) && !device.State.Awake)
+                ScheduleWakeProbe(device);
+        });
+    }
+
+    /// <summary>Runs work on the monitor thread after a delay.</summary>
+    private void After(TimeSpan delay, Action action) =>
+        Task.Delay(delay).ContinueWith(_ => Host.Enqueue(action));
 
     private void Wake(DeviceContext device)
     {
@@ -200,11 +255,17 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
                 var device = _devices.FirstOrDefault(d => d.Channel == channel && d.Device.DeviceIndex == deviceIndex);
                 if (linkLost)
                 {
-                    if (device != null) Update(device, device.State with { Awake = false });
+                    if (device != null) MarkAsleep(device);
                 }
                 else if (device != null)
                 {
-                    Try(device, () => RefreshAll(device));
+                    // The receiver says it's connected, so show it awake now and read it once it has settled.
+                    Update(device, device.State with { Awake = true });
+                    After(SettleDelay, () =>
+                    {
+                        if (_devices.Contains(device) && device.State.Awake)
+                            Try(device, () => RefreshAll(device));
+                    });
                 }
                 else
                 {
@@ -251,6 +312,7 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
         public byte? BatteryFeatureIndex { get; set; }
         public byte? OnboardFeatureIndex { get; set; }
         public bool SuppressNextDpiEvent { get; set; }
+        public bool WakeProbeScheduled { get; set; }
 
         public override void SetDpi(int dpi)
         {

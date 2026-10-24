@@ -52,19 +52,20 @@ public sealed class TrayIcon : IDisposable
         }
     }
 
-    /// <summary>Shows the battery of the first mouse (or else the first device with a battery) and lists all devices in the tooltip.</summary>
+    /// <summary>Shows the battery of the first mouse (or else the first device with a battery), even while it sleeps, and lists all devices in the tooltip.</summary>
     public void Update(IReadOnlyList<DeviceState> devices)
     {
         var main = devices.Where(d => d.Battery != null).OrderBy(d => d.Kind == DeviceKind.Mouse ? 0 : 1).FirstOrDefault();
-        _percent = main is { Awake: true } ? main.Battery?.Percent : null;
-        _charging = main?.Battery?.IsCharging == true;
+        // A sleeping mouse keeps the battery level it last reported, so show that rather than nothing.
+        _percent = main?.Battery?.Percent;
+        _charging = main is { Awake: true, Battery.IsCharging: true };
         RefreshIcon();
 
         var lines = devices.Count == 0
             ? ["No devices found"]
             : devices.Select(d => d.Awake
                 ? $"{d.DisplayName}: {(d.Battery?.Percent is { } p ? $"{p}%" : "connected")}{(d.Battery?.IsCharging == true ? " (charging)" : "")}"
-                : $"{d.DisplayName}: asleep");
+                : $"{d.DisplayName}: asleep{(d.Battery?.Percent is { } last ? $", {last}%" : "")}");
         var tooltip = string.Join("\n", lines);
         _icon.Text = tooltip.Length > 63 ? tooltip[..63] : tooltip; // Windows limit
     }

@@ -13,6 +13,7 @@ public sealed class HidppChannel : IDisposable
 {
     private readonly List<HidStream> _streams = new();
     private readonly HidStream _writeStream;
+    private readonly HidStream? _shortWriteStream;
     private readonly object _requestLock = new();
     private readonly BlockingCollection<byte[]> _responses = new();
     private volatile bool _disposed;
@@ -43,6 +44,8 @@ public sealed class HidppChannel : IDisposable
             _streams.Add(stream);
             if (writeStream == null && device.GetMaxOutputReportLength() >= HidppConstants.LongReportLength)
                 writeStream = stream;
+            else if (_shortWriteStream == null && device.GetMaxOutputReportLength() == HidppConstants.ShortReportLength)
+                _shortWriteStream = stream;
         }
 
         if (writeStream == null)
@@ -133,6 +136,54 @@ public sealed class HidppChannel : IDisposable
                     return result;
                 }
                 // Anything else is a notification or an unrelated report: keep waiting.
+            }
+        }
+    }
+
+    /// <summary>Reads a HID++ 1.0 short register (from a receiver). Returns its 3 bytes.</summary>
+    public byte[] ReadRegister(byte deviceIndex, byte address, int timeoutMs = 1000) =>
+        RegisterRequest(deviceIndex, HidppConstants.GetShortRegister, address, [0, 0, 0], timeoutMs);
+
+    /// <summary>Writes a HID++ 1.0 short register (on a receiver).</summary>
+    public void WriteRegister(byte deviceIndex, byte address, ReadOnlySpan<byte> value, int timeoutMs = 1000) =>
+        RegisterRequest(deviceIndex, HidppConstants.SetShortRegister, address, value, timeoutMs);
+
+    /// <summary>
+    /// Sends a HID++ 1.0 register request as a short report. Windows only accepts short reports on
+    /// the short collection, so they go there when the device has one.
+    /// </summary>
+    private byte[] RegisterRequest(byte deviceIndex, byte subId, byte address, ReadOnlySpan<byte> value, int timeoutMs)
+    {
+        var request = new byte[HidppConstants.ShortReportLength];
+        request[0] = HidppConstants.ShortReportId;
+        request[1] = deviceIndex;
+        request[2] = subId;
+        request[3] = address;
+        value[..Math.Min(3, value.Length)].CopyTo(request.AsSpan(4));
+
+        lock (_requestLock)
+        {
+            while (_responses.TryTake(out _)) { }
+
+            ReportSent?.Invoke(request);
+            (_shortWriteStream ?? _writeStream).Write(request);
+
+            var deadline = Environment.TickCount64 + timeoutMs;
+            while (true)
+            {
+                var remaining = (int)(deadline - Environment.TickCount64);
+                if (remaining <= 0 || !_responses.TryTake(out var report, remaining))
+                    throw new HidppTimeoutException($"No answer from device index 0x{deviceIndex:X2} (register 0x{address:X2}).");
+
+                if (report.Length < 7 || report[1] != deviceIndex)
+                    continue;
+
+                // HID++ 1.0 error: [0x10, dev, 0x8F, subId, address, code]
+                if (report[2] == HidppConstants.Hidpp10ErrorMarker && report[3] == subId && report[4] == address)
+                    throw new HidppErrorException(report[5], isHidpp10: true);
+
+                if (report[2] == subId && report[3] == address)
+                    return report.AsSpan(4, 3).ToArray();
             }
         }
     }
