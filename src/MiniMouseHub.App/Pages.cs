@@ -378,9 +378,7 @@ internal sealed class LightingCard
     private readonly ComboBox _effect = new() { Margin = new Thickness(0, 4, 0, 0) };
     private readonly Slider _brightness = NewSlider();
     private readonly Slider _speed = NewSlider();
-    private readonly Slider _hue = NewSlider();
-    private readonly Slider _saturation = NewSlider();
-    private readonly Border _swatch = new() { Width = 28, Height = 28, CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1) };
+    private readonly ColorPicker _color = new();
     private readonly TextBlock _hint = Ui.Text("", 12, "Muted");
     private readonly System.Windows.Threading.DispatcherTimer _sendTimer = new() { Interval = SendDelay };
     private IReadOnlyList<string>? _effectNames;
@@ -400,19 +398,7 @@ internal sealed class LightingCard
         panel.Children.Add(Row("Effect", _effect));
         panel.Children.Add(Row("Brightness", _brightness));
         panel.Children.Add(Row("Speed", _speed));
-        var colorRow = new Grid();
-        colorRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        colorRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var sliders = new StackPanel();
-        sliders.Children.Add(Row("Color", _hue));
-        sliders.Children.Add(Row("Saturation", _saturation));
-        colorRow.Children.Add(sliders);
-        _swatch.Margin = new Thickness(16, 0, 0, 0);
-        _swatch.VerticalAlignment = VerticalAlignment.Center;
-        _swatch.BorderBrush = Res("Border");
-        Grid.SetColumn(_swatch, 1);
-        colorRow.Children.Add(_swatch);
-        panel.Children.Add(colorRow);
+        panel.Children.Add(Row("Color", _color.Root));
         _hint.Margin = new Thickness(0, 10, 0, 0);
         panel.Children.Add(_hint);
         Root = Ui.Card(panel);
@@ -420,8 +406,20 @@ internal sealed class LightingCard
         _on.Checked += (_, _) => Changed();
         _on.Unchecked += (_, _) => Changed();
         _effect.SelectionChanged += (_, _) => Changed();
-        foreach (var slider in new[] { _brightness, _speed, _hue, _saturation })
-            slider.ValueChanged += (_, _) => Changed();
+        _speed.ValueChanged += (_, _) => Changed();
+        _brightness.ValueChanged += (_, _) =>
+        {
+            // Brightness is the color's value, so the hex code follows it.
+            _color.SetColor(_color.Hue, _color.Saturation, (int)Math.Round(_brightness.Value));
+            Changed();
+        };
+        _color.Changed += valueChanged =>
+        {
+            if (valueChanged && (int)Math.Round(_brightness.Value) != _color.Value)
+                _brightness.Value = _color.Value; // raises Changed itself
+            else
+                Changed();
+        };
         _sendTimer.Tick += async (_, _) => await Send();
 
         Update(device);
@@ -458,8 +456,7 @@ internal sealed class LightingCard
             _effect.SelectedIndex = 0;
         _brightness.Value = settings.Brightness;
         _speed.Value = settings.Speed;
-        _hue.Value = settings.Hue;
-        _saturation.Value = settings.Saturation;
+        _color.SetColor(settings.Hue, settings.Saturation, settings.Brightness);
         _updating = false;
         RefreshControls();
     }
@@ -476,17 +473,17 @@ internal sealed class LightingCard
     private void RefreshControls()
     {
         var on = _on.IsChecked == true;
-        foreach (var control in new Control[] { _effect, _brightness, _speed, _hue, _saturation })
+        foreach (var control in new FrameworkElement[] { _effect, _brightness, _speed, _color.Root })
             control.IsEnabled = on;
-        _swatch.Background = new SolidColorBrush(FromHsv(_hue.Value / 255 * 360, _saturation.Value / 255, 1));
+        _color.Root.Opacity = on ? 1 : 0.55;
     }
 
     private LightingSettings Current() => new(
         Effect: _on.IsChecked == true ? Math.Max(_effect.SelectedIndex, 0) + 1 : 0,
         Brightness: (int)Math.Round(_brightness.Value),
         Speed: (int)Math.Round(_speed.Value),
-        Hue: (int)Math.Round(_hue.Value),
-        Saturation: (int)Math.Round(_saturation.Value));
+        Hue: _color.Hue,
+        Saturation: _color.Saturation);
 
     private async Task Send()
     {
@@ -505,23 +502,6 @@ internal sealed class LightingCard
             if (!_sendTimer.IsEnabled)
                 _pending = false;
         }
-    }
-
-    private static Color FromHsv(double hue, double saturation, double value)
-    {
-        var c = value * saturation;
-        var x = c * (1 - Math.Abs(hue / 60 % 2 - 1));
-        var m = value - c;
-        var (r, g, b) = (hue % 360) switch
-        {
-            < 60 => (c, x, 0d),
-            < 120 => (x, c, 0d),
-            < 180 => (0d, c, x),
-            < 240 => (0d, x, c),
-            < 300 => (x, 0d, c),
-            _ => (c, 0d, x),
-        };
-        return Color.FromRgb((byte)((r + m) * 255), (byte)((g + m) * 255), (byte)((b + m) * 255));
     }
 }
 
