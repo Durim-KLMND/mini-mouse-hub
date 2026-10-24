@@ -179,7 +179,7 @@ public partial class MainWindow : Window
         _keyTester = null;
         BackButton.Visibility = Visibility.Visible;
         TitleText.Text = "Settings";
-        Page.Content = SettingsPage.Build(_settings, _checkForUpdates, _sync);
+        Page.Content = SettingsPage.Build(_settings, _checkForUpdates, _sync, _monitor);
     }
 
     private void Back_Click(object sender, RoutedEventArgs e) => GoBack();

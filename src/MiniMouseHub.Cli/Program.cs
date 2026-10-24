@@ -106,7 +106,12 @@ int Run()
 void PrintDevice(LogitechDevice device, bool includeFeatures)
 {
     var name = TryGet(device.GetName) ?? "(name unavailable)";
-    var connection = device.IsWired ? "cable" : $"receiver slot {device.DeviceIndex}";
+    var connection = device.Connection switch
+    {
+        ConnectionKind.Cable => "cable",
+        ConnectionKind.Bluetooth => "Bluetooth",
+        _ => $"receiver slot {device.DeviceIndex}",
+    };
     Console.WriteLine($"{name}  [{connection}, HID++ {device.ProtocolVersion}]");
 
     try

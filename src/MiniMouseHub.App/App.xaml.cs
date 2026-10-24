@@ -48,7 +48,9 @@ public partial class App : Application
         Installation.RefreshInstalledVersion();
 
         Theme.Initialize(_settings.Theme);
-        _monitor = new DeviceMonitor();
+        _monitor = new DeviceMonitor { SettingsStore = new DeviceSettingsStore(_settings, Dispatcher) };
+        // Run straight away on the monitor thread, so a held button feels like a real one.
+        _monitor.ButtonActionTriggered += (_, action, pressed) => ButtonActions.Run(action, pressed);
         _sync = new SettingsSync(_settings);
         _sync.Pulled += () =>
         {

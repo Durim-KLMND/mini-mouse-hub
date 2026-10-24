@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text;
 using HidSharp;
 
 namespace MiniMouseHub.Core;
@@ -7,6 +8,8 @@ namespace MiniMouseHub.Core;
 /// <param name="Vendor">The brand, such as "Logitech" or "Glorious".</param>
 /// <param name="Lighting">The keyboard's RGB settings, when it has lighting the app can control.</param>
 /// <param name="Note">Something the user should know about this device, such as why its settings can't be changed.</param>
+/// <param name="Scroll">Scroll wheel settings, on mice that have them (such as SmartShift on the MX Master).</param>
+/// <param name="Buttons">Buttons that can be given another job, on mice without onboard profiles.</param>
 public record DeviceState(
     string Id,
     string Vendor,
@@ -21,7 +24,10 @@ public record DeviceState(
     DpiCapabilities? DpiCapabilities,
     OnboardMode? Mode,
     LightingState? Lighting = null,
-    string? Note = null)
+    string? Note = null,
+    ConnectionKind Connection = ConnectionKind.Unknown,
+    ScrollSettings? Scroll = null,
+    IReadOnlyList<ButtonControl>? Buttons = null)
 {
     public bool HasDpi => DpiCapabilities != null;
     public bool HasLighting => Lighting != null;
@@ -71,6 +77,12 @@ public sealed class DeviceMonitor : IDisposable, IDeviceHost
     /// <summary>Raised once the first scan for devices has finished.</summary>
     public event Action? FirstScanCompleted;
 
+    /// <summary>Raised when a button that was given an app action is pressed (true) or released (false).</summary>
+    public event Action<DeviceState, string, bool>? ButtonActionTriggered;
+
+    /// <summary>Where settings that devices forget are kept, so they can be set again when the device reconnects.</summary>
+    public IDeviceSettingsStore? SettingsStore { get; set; }
+
     public IReadOnlyList<DeviceState> Devices { get; private set; } = [];
 
     public DeviceMonitor()
@@ -103,6 +115,51 @@ public sealed class DeviceMonitor : IDisposable, IDeviceHost
 
     /// <summary>Changes a keyboard's lighting and saves it on the keyboard.</summary>
     public Task SetLightingAsync(string deviceId, LightingSettings lighting) => RunOnDevice(deviceId, d => d.SetLighting(lighting));
+
+    /// <summary>Sets how the scroll wheel ratchets (SmartShift).</summary>
+    public Task SetWheelModeAsync(string deviceId, WheelMode mode, int? threshold, int? torque) =>
+        RunOnDevice(deviceId, d => d.SetWheelMode(mode, threshold, torque));
+
+    public Task SetWheelInvertedAsync(string deviceId, bool inverted) => RunOnDevice(deviceId, d => d.SetWheelInverted(inverted));
+
+    public Task SetThumbWheelInvertedAsync(string deviceId, bool inverted) => RunOnDevice(deviceId, d => d.SetThumbWheelInverted(inverted));
+
+    /// <summary>Gives a button another job, or an app action.</summary>
+    public Task SetButtonAsync(string deviceId, int cid, ButtonAssignment assignment) => RunOnDevice(deviceId, d => d.SetButton(cid, assignment));
+
+    /// <summary>
+    /// Writes a plain-text report of every device the app can see, what it supports and the recent
+    /// HID++ traffic, for someone testing a device to send back.
+    /// </summary>
+    public Task<string> CreateDiagnosticReportAsync(string header)
+    {
+        var done = new TaskCompletionSource<string>();
+        Enqueue(() =>
+        {
+            var report = new StringBuilder();
+            report.AppendLine(header);
+            report.AppendLine($"Created {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz} on {Environment.OSVersion}");
+            report.AppendLine();
+            report.AppendLine("== Logitech HID collections ==");
+            try { report.AppendLine(Hidpp.HidppDiscovery.DescribeAll()); }
+            catch (Exception e) { report.AppendLine($"Couldn't list them: {e.Message}"); }
+            foreach (var provider in _providers)
+            {
+                try { provider.Describe(report); }
+                catch (Exception e) { report.AppendLine($"{provider.GetType().Name} failed: {e}"); }
+            }
+            report.AppendLine();
+            report.AppendLine("== What the app shows ==");
+            foreach (var device in Devices)
+                report.AppendLine(device.ToString());
+            report.AppendLine();
+            report.AppendLine("== Recent log (→ sent, ← received) ==");
+            foreach (var line in DiagnosticLog.Snapshot())
+                report.AppendLine(line);
+            done.SetResult(report.ToString());
+        });
+        return done.Task;
+    }
 
     private Task RunOnDevice(string deviceId, Action<ManagedDevice> action)
     {
@@ -163,7 +220,7 @@ public sealed class DeviceMonitor : IDisposable, IDeviceHost
     private static void SafeRun(Action action)
     {
         try { action(); }
-        catch (Exception) { }
+        catch (Exception e) { DiagnosticLog.Add($"Error: {e}"); }
     }
 
     public void Publish()
@@ -173,6 +230,8 @@ public sealed class DeviceMonitor : IDisposable, IDeviceHost
     }
 
     public void RaiseDpiChanged(DeviceState device, int before, int after) => DpiChangedOnDevice?.Invoke(device, before, after);
+
+    public void RaiseButtonAction(DeviceState device, string action, bool pressed) => ButtonActionTriggered?.Invoke(device, action, pressed);
 
     public void Dispose()
     {
@@ -194,6 +253,10 @@ public interface IDeviceHost
     void Publish();
 
     void RaiseDpiChanged(DeviceState device, int before, int after);
+
+    void RaiseButtonAction(DeviceState device, string action, bool pressed);
+
+    IDeviceSettingsStore? SettingsStore { get; }
 }
 
 /// <summary>
@@ -217,6 +280,9 @@ public abstract class DeviceProvider(IDeviceHost host) : IDisposable
 
     public virtual void Dispose() { }
 
+    /// <summary>Adds what this provider knows about its devices to a diagnostic report.</summary>
+    public virtual void Describe(StringBuilder report) { }
+
     protected void Update(ManagedDevice device, DeviceState state)
     {
         if (state == device.State) return;
@@ -235,4 +301,12 @@ public abstract class ManagedDevice(DeviceState state)
     public virtual void SelectDpiSlot(int slot) => throw new NotSupportedException($"{State.Name} has no DPI slots.");
 
     public virtual void SetLighting(LightingSettings lighting) => throw new NotSupportedException($"{State.Name}'s lighting can't be changed.");
+
+    public virtual void SetWheelMode(WheelMode mode, int? threshold, int? torque) => throw new NotSupportedException($"{State.Name} has no SmartShift.");
+
+    public virtual void SetWheelInverted(bool inverted) => throw new NotSupportedException($"{State.Name}'s scroll direction can't be changed.");
+
+    public virtual void SetThumbWheelInverted(bool inverted) => throw new NotSupportedException($"{State.Name} has no thumb wheel.");
+
+    public virtual void SetButton(int cid, ButtonAssignment assignment) => throw new NotSupportedException($"{State.Name}'s buttons can't be changed here.");
 }
