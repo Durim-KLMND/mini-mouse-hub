@@ -8,6 +8,7 @@ Mini mouse hub is a small Windows app for checking and changing your gaming gear
 
 - Shows a tile for every connected device, with its battery level and whether it's charging
 - Reads and changes the mouse's DPI, including the onboard DPI slots
+- On Logi Options mice such as the MX Master: SmartShift, scroll and thumb wheel direction, and button assignments (including app actions such as shortcuts and media keys)
 - Changes keyboard lighting on keyboards running QMK with VIA firmware
 - Warns you when the battery runs low (20%, 10% and 5%) and when the DPI is changed with the mouse's button
 - Runs in the tray, can start with Windows, and has light and dark themes
@@ -26,7 +27,8 @@ Once installed, the app keeps itself up to date, so you only run the installer o
 | Device | Connection | What works | Status |
 | --- | --- | --- | --- |
 | Logitech PRO X Superlight 2 | Lightspeed receiver or cable | Battery, charging, DPI and DPI slots, notifications | Supported and tested |
-| Other Logitech mice that speak HID++ 2.0 | Lightspeed receiver or cable | Battery and DPI, where the mouse offers them | Should work, not tested |
+| Logitech MX Master 3 / 3S and other Logi Options mice | Bolt receiver, Unifying receiver or Bluetooth | Battery, DPI, SmartShift, scroll direction, buttons | Being tested |
+| Other Logitech mice that speak HID++ 2.0 | Lightspeed, Bolt or Unifying receiver, cable or Bluetooth | Battery and DPI, where the mouse offers them | Should work, not tested |
 | Glorious GMMK Pro keyboard (with QMK/VIA firmware) | Cable | Lighting (on/off, effect, brightness, speed, color) | Supported, not tested on hardware yet |
 
 ## Not supported yet
@@ -50,8 +52,10 @@ These big gaming mouse brands don't work with Mini mouse hub so far:
 
 ## How it works
 
-It talks to Logitech devices directly over HID++ 2.0, through a Lightspeed receiver or a cable, and to keyboards running QMK with VIA (any brand) over VIA's raw HID protocol.
-DPI is saved into the mouse's onboard profile, and lighting is saved on the keyboard.
+It talks to Logitech devices directly over HID++ 2.0, through a Lightspeed, Bolt or Unifying receiver, a cable or Bluetooth, and to keyboards running QMK with VIA (any brand) over VIA's raw HID protocol.
+On gaming mice, DPI is saved into the mouse's onboard profile, and lighting is saved on the keyboard. Logi Options mice (such as the MX Master) have no onboard profiles and forget some settings when they reconnect, so the app remembers what you set and sets it again each time they connect. Close Logi Options+ while using Mini mouse hub, or the two will undo each other's settings.
+
+If something doesn't work, Settings > Troubleshooting > Save diagnostic report writes a text file with your Logitech devices, their features and the app's recent HID++ traffic, which you can attach to an issue.
 
 The project is early: the PRO X Superlight 2 is the only device tested so far.
 

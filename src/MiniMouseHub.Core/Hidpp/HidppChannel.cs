@@ -22,6 +22,9 @@ public sealed class HidppChannel : IDisposable
     public int ProductId { get; }
     public string ProductName { get; }
 
+    /// <summary>The device is connected by Bluetooth: it is the only device on the channel, at index 0xFF.</summary>
+    public bool IsBluetooth { get; }
+
     /// <summary>Raised for every report that arrives, including notifications sent by the device on its own.</summary>
     public event Action<byte[]>? ReportReceived;
 
@@ -34,6 +37,7 @@ public sealed class HidppChannel : IDisposable
         DevicePath = first.DevicePath;
         ProductId = first.ProductID;
         ProductName = SafeProductName(first);
+        IsBluetooth = HidppDiscovery.IsBluetooth(first);
 
         HidStream? writeStream = null;
         foreach (var device in collections)
