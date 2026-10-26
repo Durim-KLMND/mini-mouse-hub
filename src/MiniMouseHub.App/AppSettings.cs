@@ -32,6 +32,12 @@ public class AppSettings
     /// </summary>
     public Dictionary<string, DeviceSettings> Devices { get; set; } = new();
 
+    /// <summary>
+    /// How each device's battery has been running down, by model name, to estimate the time left.
+    /// Belongs to the devices on this PC, so it isn't synced.
+    /// </summary>
+    public Dictionary<string, BatteryHistory> BatteryHistory { get; set; } = new();
+
     /// <summary>GitHub sign-in for syncing settings. Stays on this PC and is never uploaded.</summary>
     public GitHubAccount? GitHub { get; set; }
 
@@ -85,21 +91,22 @@ public class AppSettings
         Saved?.Invoke();
     }
 
-    /// <summary>The settings as uploaded to GitHub: everything except the sign-in.</summary>
+    /// <summary>The settings as uploaded to GitHub: everything except the sign-in and battery history.</summary>
     public string ToBackupJson()
     {
         var copy = (AppSettings)MemberwiseClone();
         copy.GitHub = null;
+        copy.BatteryHistory = new();
         return JsonSerializer.Serialize(copy, Indented);
     }
 
-    /// <summary>Replaces these settings with a backup, keeping this PC's sign-in, and saves them.</summary>
+    /// <summary>Replaces these settings with a backup, keeping this PC's sign-in and battery history, and saves them.</summary>
     public void RestoreBackup(string json)
     {
         var backup = JsonSerializer.Deserialize<AppSettings>(json) ?? throw new InvalidDataException("The backup is empty.");
         foreach (var property in typeof(AppSettings).GetProperties())
         {
-            if (property.CanWrite && property.Name != nameof(GitHub))
+            if (property.CanWrite && property.Name is not (nameof(GitHub) or nameof(BatteryHistory)))
                 property.SetValue(this, property.GetValue(backup));
         }
         Save();

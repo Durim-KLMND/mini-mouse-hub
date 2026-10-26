@@ -35,6 +35,9 @@ public record DeviceState(
     /// <summary>The keymap of a keyboard whose keys can be changed, so keys such as the lighting key can be turned off.</summary>
     public Via.KeymapState? Keymap { get; init; }
 
+    /// <summary>How long the battery should last, worked out by the app from how fast it has been running down.</summary>
+    public BatteryEstimate? TimeLeft { get; init; }
+
     /// <summary>Brand and model, such as "Logitech PRO X Superlight 2", so devices can be told apart at a glance.</summary>
     public string DisplayName => DeviceNames.Display(Vendor, Name);
 }
