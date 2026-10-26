@@ -25,8 +25,10 @@ public static class ReceiverPairings
         {
             return ReadSlots(channel);
         }
-        catch (Exception e) when (e is not IOException)
+        catch (Exception e)
         {
+            // Some receivers (such as the PRO X Superlight 2's, C54D) refuse the request outright: Windows
+            // fails the write with "Incorrect function".
             DiagnosticLog.Add($"Couldn't read the pairings of {channel.ProductName}: {e.Message}");
             return null;
         }

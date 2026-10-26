@@ -151,15 +151,15 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
                     if (LogitechDevice.TryConnect(c, index) is { } device)
                         found.Add(device);
                 }
-                paired = ReceiverPairings.Read(c);
+                paired = ReceiverPairings.Read(c); // never throws: it only adds offline devices
                 if (paired != null)
                     DiagnosticLog.Add($"{c.ProductName} has paired: {(paired.Count == 0 ? "nothing" : string.Join(", ", paired.Select(p => $"{p.Index}: {p.Name ?? "?"} ({p.Kind})")))}");
             }
         }
         catch (Exception e)
         {
-            DiagnosticLog.Add($"Couldn't list the devices on {c.ProductName}: {e.Message}");
-            return;
+            // Keep the devices found so far.
+            DiagnosticLog.Add($"Couldn't list all the devices on {c.ProductName}: {e.Message}");
         }
 
         foreach (var logi in found)
