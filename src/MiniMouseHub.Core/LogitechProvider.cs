@@ -125,12 +125,42 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
         }
     }
 
-    /// <summary>Finds the devices behind a receiver (or the wired device itself) and adds any new ones.</summary>
+    /// <summary>
+    /// Finds the devices behind a receiver (or the wired or Bluetooth device itself) and adds any new
+    /// ones. Devices paired with a receiver are added even when they are switched off, so they show
+    /// as offline straight away and come online as soon as they connect.
+    /// </summary>
     private void Enumerate(ChannelContext channel)
     {
-        List<LogitechDevice> found;
-        try { found = LogitechDevice.Enumerate(channel.Channel); }
-        catch (Exception) { return; }
+        var c = channel.Channel;
+        var found = new List<LogitechDevice>();
+        List<PairedDevice>? paired = null;
+        try
+        {
+            // A wired or Bluetooth HID++ 2.0 device answers at 0xFF. A receiver answers there too, but with a HID++ 1.0 error.
+            if (LogitechDevice.TryConnect(c, HidppConstants.WiredDeviceIndex) is { } direct)
+            {
+                found.Add(direct);
+            }
+            else if (!c.IsBluetooth)
+            {
+                paired = ReceiverPairings.Read(c);
+                if (paired != null)
+                    DiagnosticLog.Add($"{c.ProductName} has paired: {(paired.Count == 0 ? "nothing" : string.Join(", ", paired.Select(p => $"{p.Index}: {p.Name ?? "?"} ({p.Kind})")))}");
+                // Only ask the slots that hold a device, when the receiver says which they are.
+                var indexes = paired is { Count: > 0 } ? paired.Select(p => p.Index) : [1, 2, 3, 4, 5, 6];
+                foreach (var index in indexes)
+                {
+                    if (LogitechDevice.TryConnect(c, index) is { } device)
+                        found.Add(device);
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            DiagnosticLog.Add($"Couldn't list the devices on {c.ProductName}: {e.Message}");
+            return;
+        }
 
         foreach (var logi in found)
         {
@@ -149,6 +179,24 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
                 Connection: logi.Connection));
             _devices.Add(device);
             Try(device, () => RefreshAll(device));
+        }
+
+        // Paired but switched off or asleep: show it offline and keep checking for it.
+        var offline = c.IsBluetooth && found.Count == 0
+            ? [new PairedDevice(HidppConstants.WiredDeviceIndex, c.ProductName, DeviceKind.Unknown)]
+            : paired?.Where(p => found.All(f => f.DeviceIndex != p.Index)) ?? [];
+        foreach (var p in offline)
+        {
+            var id = $"{c.DevicePath}#{p.Index}";
+            if (_devices.Any(d => d.State.Id == id))
+                continue;
+            var logi = LogitechDevice.Offline(c, p.Index);
+            DiagnosticLog.Add($"{p.Name ?? "A device"} at index 0x{p.Index:X2} on {c.ProductName} is paired but offline");
+            var device = new DeviceContext(this, channel, logi, new DeviceState(
+                id, "Logitech", p.Name ?? "Logitech device", p.Kind, false, false, null, null, null, null, null, null,
+                Connection: logi.Connection));
+            _devices.Add(device);
+            ScheduleWakeProbe(device);
         }
         Host.Publish();
     }
@@ -184,8 +232,21 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
 
     private void Wake(DeviceContext device)
     {
-        // A cheap ping; if it answers, the device is back.
-        device.Channel.Channel.Request(device.Device.DeviceIndex, 0x00, 1, [0, 0, 0x5A], timeoutMs: 700);
+        // A cheap ping; if it answers, the device is back. A receiver answers for a device that is
+        // switched off with an error, which means the same as no answer.
+        try
+        {
+            device.Channel.Channel.Request(device.Device.DeviceIndex, 0x00, 1, [0, 0, 0x5A], timeoutMs: 700);
+        }
+        catch (HidppErrorException e)
+        {
+            throw new HidppTimeoutException($"{device.State.Name} isn't connected ({e.Message}).");
+        }
+        if (device.Device.IsOffline && LogitechDevice.TryConnect(device.Channel.Channel, device.Device.DeviceIndex) is { } connected)
+        {
+            DiagnosticLog.Add($"{device.State.Name} came online (HID++ {connected.ProtocolVersion})");
+            device.Device = connected;
+        }
         RefreshAll(device);
     }
 
@@ -393,12 +454,13 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
                 else if (device != null)
                 {
                     device.NeedsRestore = true;
+                    DiagnosticLog.Add($"{device.State.Name} connected");
                     // The receiver says it's connected, so show it awake now and read it once it has settled.
                     Update(device, device.State with { Awake = true });
                     After(SettleDelay, () =>
                     {
                         if (_devices.Contains(device) && device.State.Awake)
-                            Try(device, () => RefreshAll(device));
+                            Try(device, () => Wake(device)); // also replaces a device that was offline since the app started
                     });
                 }
                 else

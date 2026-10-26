@@ -153,6 +153,13 @@ public sealed class HidppChannel : IDisposable
         RegisterRequest(deviceIndex, HidppConstants.SetShortRegister, address, value, timeoutMs);
 
     /// <summary>
+    /// Reads a HID++ 1.0 long register (from a receiver), such as the pairing information. The request is
+    /// a short report with up to 3 parameter bytes; returns the 16 bytes of the long answer.
+    /// </summary>
+    public byte[] ReadLongRegister(byte deviceIndex, byte address, ReadOnlySpan<byte> parameters, int timeoutMs = 1000) =>
+        RegisterRequest(deviceIndex, HidppConstants.GetLongRegister, address, parameters, timeoutMs);
+
+    /// <summary>
     /// Sends a HID++ 1.0 register request as a short report. Windows only accepts short reports on
     /// the short collection, so they go there when the device has one.
     /// </summary>
@@ -187,7 +194,7 @@ public sealed class HidppChannel : IDisposable
                     throw new HidppErrorException(report[5], isHidpp10: true);
 
                 if (report[2] == subId && report[3] == address)
-                    return report.AsSpan(4, 3).ToArray();
+                    return report.AsSpan(4, Math.Min(report.Length - 4, subId == HidppConstants.GetLongRegister ? 16 : 3)).ToArray();
             }
         }
     }

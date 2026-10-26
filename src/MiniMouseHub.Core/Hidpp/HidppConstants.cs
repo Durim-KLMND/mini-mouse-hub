@@ -32,6 +32,13 @@ public static class HidppConstants
     /// <summary>HID++ 1.0 sub-IDs for reading and writing a receiver's short registers.</summary>
     public const byte SetShortRegister = 0x80;
     public const byte GetShortRegister = 0x81;
+    public const byte GetLongRegister = 0x83;
+
+    /// <summary>Receiver long register with pairing information and names of paired devices, by sub-register.</summary>
+    public const byte ReceiverInfoRegister = 0xB5;
+
+    /// <summary>Bolt receiver product ID. Bolt keeps pairing information in other sub-registers than Unifying and Lightspeed.</summary>
+    public const int BoltReceiverProductId = 0xC548;
 
     /// <summary>Receiver register holding which notifications it sends to the computer.</summary>
     public const byte NotificationFlagsRegister = 0x00;

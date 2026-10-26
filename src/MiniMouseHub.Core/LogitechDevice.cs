@@ -28,28 +28,37 @@ public sealed class LogitechDevice
     /// Finds HID++ 2.0 devices on a channel: the device itself when it's wired, or the devices paired
     /// with it when it's a receiver. Devices that are switched off or asleep don't answer and are skipped.
     /// </summary>
-    public static List<LogitechDevice> Enumerate(HidppChannel channel)
+    public static List<LogitechDevice> Enumerate(HidppChannel channel, IEnumerable<byte>? indexes = null)
     {
         var found = new List<LogitechDevice>();
 
         // A wired or Bluetooth HID++ 2.0 device answers at 0xFF. A receiver answers there too, but with a HID++ 1.0 error.
-        var direct = TryPing(channel, HidppConstants.WiredDeviceIndex);
+        var direct = TryConnect(channel, HidppConstants.WiredDeviceIndex);
         if (direct != null)
         {
             found.Add(direct);
             return found;
         }
 
-        for (byte index = 1; index <= 6; index++)
+        foreach (var index in indexes ?? [1, 2, 3, 4, 5, 6])
         {
-            var device = TryPing(channel, index);
+            var device = TryConnect(channel, index);
             if (device != null)
                 found.Add(device);
         }
         return found;
     }
 
-    private static LogitechDevice? TryPing(HidppChannel channel, byte deviceIndex)
+    /// <summary>
+    /// A device that is known (paired with a receiver, or paired by Bluetooth) but didn't answer, because
+    /// it is switched off or asleep. Replace it with <see cref="TryConnect"/> once it answers.
+    /// </summary>
+    public static LogitechDevice Offline(HidppChannel channel, byte deviceIndex) => new(channel, deviceIndex, new Version(0, 0));
+
+    public bool IsOffline => ProtocolVersion.Major == 0;
+
+    /// <summary>Pings a device; returns it when it answers as a HID++ 2.0 device.</summary>
+    public static LogitechDevice? TryConnect(HidppChannel channel, byte deviceIndex)
     {
         const byte pingData = 0x5A;
         try

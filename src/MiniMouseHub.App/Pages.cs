@@ -130,7 +130,7 @@ internal static class HomePage
         var info = new StackPanel();
         Grid.SetRow(info, 1);
         info.Children.Add(Ui.Text(device.DisplayName, 15, weight: FontWeights.SemiBold));
-        var status = device.Awake ? Ui.Describe(device) : "Asleep. Move it to wake it";
+        var status = device.Awake ? Ui.Describe(device) : "Offline. Switch it on or move it";
         info.Children.Add(Ui.Text(status, 12, "Muted"));
 
         if (device.Battery != null)
@@ -281,7 +281,7 @@ internal sealed class DevicePage
 
         _status.Text = device.Awake
             ? Ui.Describe(device, longForm: true)
-            : "Asleep or switched off. Move it to wake it.";
+            : "Offline: switched off or asleep. Switch it on or move it to wake it.";
 
         _noteCard.Visibility = device.Note != null ? Visibility.Visible : Visibility.Collapsed;
         _note.Text = device.Note ?? "";
