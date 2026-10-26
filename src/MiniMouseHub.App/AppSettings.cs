@@ -17,6 +17,12 @@ public class AppSettings
     public bool AutoUpdate { get; set; } = true;
     public ThemeChoice Theme { get; set; } = ThemeChoice.System;
 
+    /// <summary>
+    /// Keys turned off on VIA keyboards, by keyboard model ("VID:PID") and key ("layer:row:column"),
+    /// with the keycode each key had, so it can be turned back on.
+    /// </summary>
+    public Dictionary<string, Dictionary<string, ushort>> DisabledKeys { get; set; } = new();
+
     /// <summary>Draw the battery level as the tray icon; when off, the tray shows the app icon.</summary>
     public bool TrayShowsBattery { get; set; } = true;
 

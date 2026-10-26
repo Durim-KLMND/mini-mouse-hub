@@ -23,12 +23,34 @@ public static class ViaEffects
         "Multi-splash", "Solid splash", "Solid multi-splash",
     ];
 
-    private static readonly IReadOnlyList<string> Numbered = Enumerable.Range(1, 44).Select(n => $"Effect {n}").ToArray();
+    /// <summary>
+    /// The 22 effects Keychron's RGB boards (Q, V and K Pro series) are usually built with, from the
+    /// ENABLE_RGB_MATRIX_* list in their config.h plus solid color, in QMK's effect order. Models differ, so this is
+    /// only used when the keyboard reports exactly this many effects.
+    /// </summary>
+    public static readonly IReadOnlyList<string> Keychron =
+    [
+        "Solid color", "Breathing", "Band spiral", "Cycle all", "Cycle left and right", "Cycle up and down",
+        "Rainbow chevron", "Cycle out and in", "Cycle out and in (dual)", "Cycle pinwheel", "Cycle spiral",
+        "Dual beacon", "Rainbow beacon", "Jellybean raindrops", "Pixel rain", "Typing heatmap", "Digital rain",
+        "Reactive (simple)", "Reactive multi-wide", "Reactive multi-nexus", "Splash", "Solid splash",
+    ];
 
-    public static IReadOnlyList<string> For(int vendorId, int productId) => (vendorId, productId) switch
+    public const int KeychronVendorId = 0x3434;
+
+    private const int MostEffects = 44;
+
+    /// <param name="count">How many effects the keyboard says it has, when it was asked.</param>
+    public static IReadOnlyList<string> For(int vendorId, int productId, int? count = null) => (vendorId, productId) switch
     {
         // GMMK Pro, ANSI and ISO, both board revisions.
         (0x320F, 0x5044) => GmmkPro,
-        _ => Numbered,
+        (KeychronVendorId, _) when count == Keychron.Count => Keychron,
+        _ => Numbered(count ?? MostEffects),
     };
+
+    /// <summary>Whether the app should ask the keyboard how many effects it has, because it has no list for it.</summary>
+    public static bool NeedsCount(int vendorId, int productId) => (vendorId, productId) != (0x320F, 0x5044);
+
+    private static IReadOnlyList<string> Numbered(int count) => Enumerable.Range(1, Math.Clamp(count, 1, 255)).Select(n => $"Effect {n}").ToArray();
 }

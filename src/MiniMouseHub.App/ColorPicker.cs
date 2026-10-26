@@ -10,7 +10,8 @@ namespace MiniMouseHub.App;
 
 /// <summary>
 /// Picks a lighting color: a hue/saturation field, a row of presets and a hex box. Values are 0–255,
-/// like the keyboard's own HSV. Value (brightness) only changes when a hex code is typed in.
+/// like the keyboard's own HSV. Value (brightness) only changes when a hex code is typed in. The # sits
+/// beside the hex box rather than in it, so selecting the box copies just the six digits.
 /// </summary>
 internal sealed class ColorPicker
 {
@@ -24,7 +25,9 @@ internal sealed class ColorPicker
     private readonly Ellipse _marker = new() { Width = 16, Height = 16, StrokeThickness = 2, Stroke = Brushes.White, IsHitTestVisible = false };
     private readonly Ellipse _markerRing = new() { Width = 18, Height = 18, StrokeThickness = 1, Stroke = new SolidColorBrush(Color.FromArgb(0x80, 0, 0, 0)), IsHitTestVisible = false };
     private readonly Border _swatch = new() { Width = 32, Height = 32, CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1) };
-    private readonly TextBox _hex = new() { Width = 96, MaxLength = 7, VerticalContentAlignment = VerticalAlignment.Center };
+    private const int HexDigits = 6;
+
+    private readonly TextBox _hex = new() { Width = 84, MaxLength = HexDigits, VerticalContentAlignment = VerticalAlignment.Center };
     private readonly TextBlock _hexError = Ui.Text("", 12, "Bad");
 
     public int Hue { get; private set; }
@@ -83,9 +86,15 @@ internal sealed class ColorPicker
         var hexRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
         _swatch.BorderBrush = Res("Border");
         hexRow.Children.Add(_swatch);
-        _hex.Margin = new Thickness(10, 0, 0, 0);
+        var hash = Ui.Text("#", 14, "Muted");
+        hash.FontFamily = new FontFamily("Consolas");
+        hash.VerticalAlignment = VerticalAlignment.Center;
+        hash.Margin = new Thickness(10, 0, 4, 0);
+        hexRow.Children.Add(hash);
         _hex.FontFamily = new FontFamily("Consolas");
-        _hex.ToolTip = "Type a hex color like #FF8800 and press Enter";
+        _hex.ToolTip = "Type a hex color like FF8800 and press Enter";
+        _hex.PreviewTextInput += (_, e) => e.Handled = !e.Text.All(Uri.IsHexDigit);
+        DataObject.AddPastingHandler(_hex, OnPaste);
         _hex.KeyDown += (_, e) => { if (e.Key == Key.Enter) ApplyHex(); };
         _hex.LostKeyboardFocus += (_, _) => ApplyHex();
         hexRow.Children.Add(_hex);
@@ -121,14 +130,37 @@ internal sealed class ColorPicker
         Changed?.Invoke(false);
     }
 
+    /// <summary>Pastes only the digits, so "#FF8800" doesn't end up with a second #.</summary>
+    private void OnPaste(object sender, DataObjectPastingEventArgs e)
+    {
+        e.CancelCommand();
+        if (e.SourceDataObject.GetData(DataFormats.UnicodeText) is not string pasted)
+            return;
+        var digits = CleanHex(pasted);
+        var room = Math.Max(0, HexDigits - (_hex.Text.Length - _hex.SelectionLength));
+        _hex.SelectedText = digits[..Math.Min(digits.Length, room)];
+        _hex.CaretIndex = _hex.SelectionStart + _hex.SelectionLength;
+    }
+
+    /// <summary>The hex digits of a pasted or typed color, without a leading # or 0x.</summary>
+    internal static string CleanHex(string text)
+    {
+        text = text.Trim();
+        if (text.StartsWith('#'))
+            text = text[1..];
+        else if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            text = text[2..];
+        return string.Concat(text.Where(Uri.IsHexDigit));
+    }
+
     private void ApplyHex()
     {
-        var text = _hex.Text.Trim().TrimStart('#');
+        var text = CleanHex(_hex.Text);
         if (text.Length == 3)
             text = string.Concat(text.Select(c => $"{c}{c}"));
         if (text.Length != 6 || !int.TryParse(text, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rgb))
         {
-            _hexError.Text = "Use a code like #FF8800";
+            _hexError.Text = "Use a code like FF8800";
             return;
         }
         _hexError.Text = "";
@@ -136,7 +168,7 @@ internal sealed class ColorPicker
         if (color == CurrentColor()) return;
         var (h, s, v) = ToHsv(color);
         SetColor(h, s, v);
-        _hex.Text = $"#{text.ToUpperInvariant()}"; // keep what was typed, the keyboard's HSV can round it slightly
+        _hex.Text = text.ToUpperInvariant(); // keep what was typed, the keyboard's HSV can round it slightly
         Changed?.Invoke(true);
     }
 
@@ -147,7 +179,7 @@ internal sealed class ColorPicker
         var color = CurrentColor();
         _swatch.Background = new SolidColorBrush(color);
         if (!_hex.IsKeyboardFocused)
-            _hex.Text = $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+            _hex.Text = $"{color.R:X2}{color.G:X2}{color.B:X2}";
         _hexError.Text = "";
         PlaceMarker();
     }

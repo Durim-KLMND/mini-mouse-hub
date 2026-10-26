@@ -131,7 +131,8 @@ public record LightingSettings(int Effect, int Brightness, int Speed, int Hue, i
 }
 
 /// <param name="EffectNames">The effects the keyboard offers; effect number n is EffectNames[n - 1].</param>
-public record LightingState(LightingSettings Settings, IReadOnlyList<string> EffectNames);
+/// <param name="HasColor">False for single-color backlights, which only have brightness, effect and speed.</param>
+public record LightingState(LightingSettings Settings, IReadOnlyList<string> EffectNames, bool HasColor = true);
 
 /// <summary>How a device reaches the computer.</summary>
 public enum ConnectionKind

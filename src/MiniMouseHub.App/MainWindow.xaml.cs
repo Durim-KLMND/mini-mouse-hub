@@ -131,7 +131,7 @@ public partial class MainWindow : Window
         _keyTester = null;
         BackButton.Visibility = Visibility.Visible;
         TitleText.Text = device.DisplayName;
-        _devicePage = new DevicePage(_monitor, device, () => ShowKeyTester(device));
+        _devicePage = new DevicePage(_monitor, device, _settings, () => ShowKeyTester(device));
         Page.Content = _devicePage.Root;
     }
 
