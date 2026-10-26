@@ -99,6 +99,7 @@ public partial class App : Application
 
     private void OnDevicesChanged(IReadOnlyList<DeviceState> devices)
     {
+        devices = WithTimeLeft(devices);
         _window?.Render(devices, _firstScanDone);
         _tray?.Update(devices);
 
@@ -108,8 +109,31 @@ public partial class App : Application
             if (!_lowBattery.TryGetValue(device.Id, out var alert))
                 _lowBattery[device.Id] = alert = new LowBatteryAlert(20, 10, 5);
             if (alert.Check(battery) is { } threshold && _settings.LowBatteryNotifications)
-                _tray?.Notify($"{device.DisplayName}: battery low", $"{battery.Percent}% left. Time to charge it soon.", warning: threshold <= 10);
+                _tray?.Notify($"{device.DisplayName}: battery low",
+                    $"{battery.Percent}% left{(device.TimeLeft is { } left ? $", {left.Describe().ToLowerInvariant()}" : "")}. Time to charge it soon.",
+                    warning: threshold <= 10);
         }
+    }
+
+    /// <summary>Records each battery reading and adds the estimated time left to the devices.</summary>
+    private IReadOnlyList<DeviceState> WithTimeLeft(IReadOnlyList<DeviceState> devices)
+    {
+        var now = DateTimeOffset.Now;
+        var changed = false;
+        var result = devices.Select(device =>
+        {
+            if (device.Battery is not { } battery) return device;
+            // By model name, like device settings, so it survives the receiver moving to another USB port.
+            if (!_settings.BatteryHistory.TryGetValue(device.Name, out var history))
+                _settings.BatteryHistory[device.Name] = history = new BatteryHistory();
+            // A sleeping device shows the level it last reported, which says nothing new.
+            if (device.Awake)
+                changed |= BatteryEstimator.Record(history, battery, now);
+            return device with { TimeLeft = BatteryEstimator.Estimate(history, battery, now) };
+        }).ToList();
+        if (changed)
+            _settings.Save();
+        return result;
     }
 
     // ---- Updates ----

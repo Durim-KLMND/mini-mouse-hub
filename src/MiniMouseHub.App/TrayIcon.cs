@@ -64,7 +64,7 @@ public sealed class TrayIcon : IDisposable
         var lines = devices.Count == 0
             ? ["No devices found"]
             : devices.Select(d => d.Awake
-                ? $"{d.DisplayName}: {(d.Battery?.Percent is { } p ? $"{p}%" : "connected")}{(d.Battery?.IsCharging == true ? " (charging)" : "")}"
+                ? $"{d.DisplayName}: {(d.Battery?.Percent is { } p ? $"{p}%" : "connected")}{(d.Battery?.IsCharging == true ? " (charging)" : d.TimeLeft is { } left ? $", {left.Describe().ToLowerInvariant()}" : "")}"
                 : $"{d.DisplayName}: offline{(d.Battery?.Percent is { } last ? $", {last}%" : "")}");
         var tooltip = string.Join("\n", lines);
         _icon.Text = tooltip.Length > 63 ? tooltip[..63] : tooltip; // Windows limit

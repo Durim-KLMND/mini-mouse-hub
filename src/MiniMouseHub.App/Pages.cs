@@ -48,6 +48,15 @@ internal static class Ui
         _ => "On battery",
     };
 
+    /// <summary>The estimated time left, or why there isn't one yet. Null when it doesn't apply.</summary>
+    public static string? TimeLeftText(DeviceState device) => device switch
+    {
+        { Battery: null } or { Battery.Percent: null } or { Battery.IsCharging: true } or { Battery.Charging: ChargingState.Full } => null,
+        { TimeLeft: { FromLastCharge: true } left } => $"{left.Describe()}, going by your last charge",
+        { TimeLeft: { } left } => left.Describe(),
+        _ => "Working out the time left. Check back after a few hours of use.",
+    };
+
     public static string BatteryColor(BatteryInfo? battery) => battery?.Percent switch
     {
         null => "Muted",
@@ -146,6 +155,12 @@ internal static class HomePage
             Grid.SetColumn(pct, 1);
             row.Children.Add(pct);
             info.Children.Add(row);
+            if (device.TimeLeft is { } left)
+            {
+                var timeLeft = Ui.Text(left.Describe(), 12, "Muted");
+                timeLeft.Margin = new Thickness(0, 4, 0, 0);
+                info.Children.Add(timeLeft);
+            }
         }
         content.Children.Add(info);
 
@@ -166,6 +181,7 @@ internal sealed class DevicePage
     private readonly TextBlock _batteryPercent = Ui.Text("–", 34, weight: FontWeights.SemiBold);
     private readonly TextBlock _charging = Ui.Text("", 13, "Muted");
     private readonly ContentControl _batteryBar = new() { Margin = new Thickness(0, 10, 0, 0) };
+    private readonly TextBlock _timeLeft = Ui.Text("", 13, "Muted");
     private readonly TextBlock _dpiValue = Ui.Text("–", 34, weight: FontWeights.SemiBold);
     private readonly WrapPanel _slots = new() { Margin = new Thickness(0, 6, 0, 0) };
     private readonly TextBlock _slotsLabel = Ui.Label("DPI slots: click one to switch, or press the DPI button on the mouse");
@@ -220,6 +236,8 @@ internal sealed class DevicePage
         batteryRow.Children.Add(_charging);
         battery.Children.Add(batteryRow);
         battery.Children.Add(_batteryBar);
+        _timeLeft.Margin = new Thickness(0, 10, 0, 0);
+        battery.Children.Add(_timeLeft);
         _noteCard = Ui.Card(_note);
         right.Children.Add(_noteCard);
         _batteryCard = Ui.Card(battery);
@@ -299,6 +317,9 @@ internal sealed class DevicePage
         _batteryPercent.Text = Ui.BatteryText(device.Battery);
         _charging.Text = device.Battery != null ? Ui.ChargingText(device.Battery) : "Not reported by this device";
         _batteryBar.Content = Ui.BatteryBar(device.Battery, 8);
+        var timeLeft = Ui.TimeLeftText(device);
+        _timeLeft.Text = timeLeft ?? "";
+        _timeLeft.Visibility = timeLeft != null ? Visibility.Visible : Visibility.Collapsed;
 
         _dpiCard.Visibility = device.HasDpi ? Visibility.Visible : Visibility.Collapsed;
         _dpiValue.Text = device.Dpi?.ToString() ?? "–";
