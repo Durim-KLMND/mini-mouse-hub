@@ -278,6 +278,25 @@ public class ViaKeyboardTests
     }
 
     [Fact]
+    public void ListsOneSystemsKeysAtATime()
+    {
+        var map = KeychronKeymap(6, 16);
+        map[0, 0, 15] = map[2, 0, 15] = 0x7821;
+        map[2, 5, 0] = 0xE3;
+        var keymap = new Keymap(4, 6, 16, Flatten(map));
+        var state = new KeymapState("3434:0110", keymap, HardwareKeys.DescribeLayers(keymap, macWindowsPairs: true));
+        var none = new Dictionary<KeyPosition, ushort>();
+
+        Assert.Equal(["Mac", "Windows"], HardwareKeys.Systems(state));
+        var mac = HardwareKeys.Find(state, none, "Mac");
+        Assert.Equal([new KeyPosition(0, 0, 15)], Assert.Single(mac).Positions);
+        Assert.Equal("Next lighting effect", mac[0].Detail);
+        var windows = HardwareKeys.Find(state, none, "Windows");
+        Assert.Equal(["Lighting key", "Left Windows key"], windows.Select(k => k.Title));
+        Assert.Equal([new KeyPosition(2, 0, 15)], windows[0].Positions);
+    }
+
+    [Fact]
     public void KeysTheAppTurnedOffAreStillListed()
     {
         var map = KeychronKeymap(6, 16);

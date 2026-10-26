@@ -54,8 +54,13 @@ public static class HardwareKeys
             : $"Layer {layer}")).ToArray();
     }
 
+    /// <summary>The systems the keyboard has separate layers for, such as Mac and Windows, or none.</summary>
+    public static IReadOnlyList<string> Systems(KeymapState state) =>
+        state.Layers.Select(l => l.System).OfType<string>().Distinct().ToArray();
+
     /// <param name="disabled">Keys the app turned off, with what they did before.</param>
-    public static IReadOnlyList<HardwareKey> Find(KeymapState state, IReadOnlyDictionary<KeyPosition, ushort> disabled)
+    /// <param name="system">Only the layers for this system, such as "Windows"; null for every layer.</param>
+    public static IReadOnlyList<HardwareKey> Find(KeymapState state, IReadOnlyDictionary<KeyPosition, ushort> disabled, string? system = null)
     {
         var keymap = state.Keymap;
         ushort Original(int layer, int row, int column)
@@ -65,7 +70,7 @@ public static class HardwareKeys
         }
 
         var found = new List<(KeyLayer Layer, int Row, int Column, ushort Code, bool Enabled)>();
-        foreach (var layer in state.Layers.Where(l => l.Layer < keymap.Layers))
+        foreach (var layer in state.Layers.Where(l => l.Layer < keymap.Layers && (system == null || l.System == system)))
         {
             for (var row = 0; row < keymap.Rows; row++)
             {
@@ -97,10 +102,10 @@ public static class HardwareKeys
                     title = under != null ? $"{first.Layer.Prefix} + {under}" : $"{first.Layer.Prefix} + the key at row {first.Row + 1}, column {first.Column + 1}";
                     what = QmkKeycodes.LightingName(first.Code);
                 }
-                var where = systems.Count switch
+                var where = (systems.Count, system) switch
                 {
-                    0 => "",
-                    1 => $"{systems[0]} layer",
+                    (0, _) or (_, not null) => "", // the tab already says which system
+                    (1, _) => $"{systems[0]} layer",
                     _ => $"{string.Join(" and ", systems)} layers",
                 };
                 var detail = string.Join(" · ", new[] { what, where }.Where(s => s != ""));

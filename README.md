@@ -110,7 +110,7 @@ Keychron's QMK keyboards (the Q, V, K Pro, Q Max and V Max series, among others)
 
 VIA can't list a keyboard's lighting effects, so the app asks how many there are and names them when the count matches Keychron's usual set; otherwise they're numbered.
 
-Under **Hardware keys**, untick a key to turn it off. The app finds lighting keys on every layer (on Keychron boards, on both the Mac and Windows layers) and the Windows, Caps Lock, Insert and Menu keys on the base layers. A key is turned off by setting it to do nothing (`KC_NO`) in the keyboard's own keymap, so it stays off without the app; what it did before is kept in the settings so it can be turned back on. **Restore default keys** puts the whole keymap back to the firmware's default.
+Under **Hardware keys**, untick a key to turn it off. The app finds lighting keys on every layer (on Keychron boards, with a tab each for the Mac and Windows layers) and the Windows, Caps Lock, Insert and Menu keys on the base layers. A key is turned off by setting it to do nothing (`KC_NO`) in the keyboard's own keymap, so it stays off without the app; what it did before is kept in the settings so it can be turned back on. **Restore default keys** puts the whole keymap back to the firmware's default.
 
 ## Device pictures
 
