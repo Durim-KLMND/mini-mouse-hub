@@ -31,6 +31,11 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
 
     public override void Poll()
     {
+        // A receiver with nothing found on it may have a device that was switched on without the
+        // receiver saying so (when connection notifications couldn't be turned on): look again.
+        foreach (var channel in _channels.Where(c => !c.Channel.IsBluetooth && _devices.All(d => d.Channel != c)).ToList())
+            Enumerate(channel);
+
         foreach (var device in _devices.ToList())
         {
             if (device.State.Awake)
@@ -118,10 +123,12 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
                 return;
             flags[1] |= HidppConstants.WirelessNotificationsFlag;
             channel.Channel.WriteRegister(HidppConstants.WiredDeviceIndex, HidppConstants.NotificationFlagsRegister, flags);
+            DiagnosticLog.Add($"Turned on connection notifications on {channel.Channel.ProductName}");
         }
-        catch (Exception)
+        catch (Exception e)
         {
-            // Not a receiver, or one that doesn't have the register. The wake probe still covers it.
+            // Not a receiver, or one that doesn't have the register. The wake probe and the poll still cover it.
+            DiagnosticLog.Add($"Couldn't turn on connection notifications on {channel.Channel.ProductName}: {e.Message}");
         }
     }
 
@@ -471,7 +478,15 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
                 }
                 else
                 {
-                    Enumerate(channel); // a device we haven't seen yet
+                    // A device we haven't seen yet. It may not answer straight after connecting, so look
+                    // once it has settled, and again a little later if it still didn't answer.
+                    After(SettleDelay, () =>
+                    {
+                        if (!_channels.Contains(channel)) return;
+                        Enumerate(channel);
+                        if (_devices.All(d => d.Channel != channel || d.Device.DeviceIndex != deviceIndex))
+                            After(TimeSpan.FromSeconds(3), () => { if (_channels.Contains(channel)) Enumerate(channel); });
+                    });
                 }
             });
             return;

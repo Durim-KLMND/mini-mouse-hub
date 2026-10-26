@@ -18,17 +18,23 @@ public static class ReceiverPairings
     private const byte BoltPairingInfo = 0x50;
     private const byte BoltName = 0x60;
 
+    /// <summary>Unifying (C52B, C532) and Bolt (C548) receivers.</summary>
+    private static readonly HashSet<int> PairingRegisterReceivers = [0xC52B, 0xC532, HidppConstants.BoltReceiverProductId];
+
     /// <summary>Returns null when the channel isn't a receiver that has pairing registers, or it answers in a way this doesn't understand.</summary>
     public static List<PairedDevice>? Read(HidppChannel channel)
     {
+        // Lightspeed receivers, such as the PRO X Superlight 2's (C54D), refuse the request: Windows fails
+        // the write with "Incorrect function", and the receiver then stops answering register requests
+        // (so connection notifications can't be turned on). Only ask receivers known to have the registers.
+        if (!PairingRegisterReceivers.Contains(channel.ProductId))
+            return null;
         try
         {
             return ReadSlots(channel);
         }
         catch (Exception e)
         {
-            // Some receivers (such as the PRO X Superlight 2's, C54D) refuse the request outright: Windows
-            // fails the write with "Incorrect function".
             DiagnosticLog.Add($"Couldn't read the pairings of {channel.ProductName}: {e.Message}");
             return null;
         }
