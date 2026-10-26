@@ -18,8 +18,23 @@ public static class ReceiverPairings
     private const byte BoltPairingInfo = 0x50;
     private const byte BoltName = 0x60;
 
-    /// <summary>Returns null when the channel isn't a receiver that has pairing registers.</summary>
+    /// <summary>Returns null when the channel isn't a receiver that has pairing registers, or it answers in a way this doesn't understand.</summary>
     public static List<PairedDevice>? Read(HidppChannel channel)
+    {
+        try
+        {
+            return ReadSlots(channel);
+        }
+        catch (Exception e)
+        {
+            // Some receivers (such as the PRO X Superlight 2's, C54D) refuse the request outright: Windows
+            // fails the write with "Incorrect function".
+            DiagnosticLog.Add($"Couldn't read the pairings of {channel.ProductName}: {e.Message}");
+            return null;
+        }
+    }
+
+    private static List<PairedDevice>? ReadSlots(HidppChannel channel)
     {
         var bolt = channel.ProductId == HidppConstants.BoltReceiverProductId;
         var paired = new List<PairedDevice>();
@@ -42,6 +57,9 @@ public static class ReceiverPairings
                 if (!answered) return null; // no answer at all: not a receiver with these registers
                 continue;
             }
+
+            if (info.Length < 8 || info[0] != (bolt ? (byte)(BoltPairingInfo + index) : (byte)(UnifyingPairingInfo + index - 1)))
+                return null; // not the answer this expects
 
             // Unifying: byte 7 holds the device kind; Bolt: byte 1. An empty Bolt slot reads as zeros.
             var kindByte = bolt ? info[1] : info[7];
@@ -66,7 +84,7 @@ public static class ReceiverPairings
             var u = channel.ReadLongRegister(HidppConstants.WiredDeviceIndex, HidppConstants.ReceiverInfoRegister, [(byte)(UnifyingName + index - 1)]);
             return Text(u, 2, Math.Min((int)u[1], 14));
         }
-        catch (HidppException)
+        catch (Exception)
         {
             return null;
         }

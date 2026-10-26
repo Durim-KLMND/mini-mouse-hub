@@ -144,22 +144,22 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
             }
             else if (!c.IsBluetooth)
             {
-                paired = ReceiverPairings.Read(c);
-                if (paired != null)
-                    DiagnosticLog.Add($"{c.ProductName} has paired: {(paired.Count == 0 ? "nothing" : string.Join(", ", paired.Select(p => $"{p.Index}: {p.Name ?? "?"} ({p.Kind})")))}");
-                // Only ask the slots that hold a device, when the receiver says which they are.
-                var indexes = paired is { Count: > 0 } ? paired.Select(p => p.Index) : [1, 2, 3, 4, 5, 6];
-                foreach (var index in indexes)
+                // Ask every slot, as before pairing information was read: the pairing registers only add
+                // the devices that are switched off, so a receiver that reports them oddly can't hide one.
+                for (byte index = 1; index <= 6; index++)
                 {
                     if (LogitechDevice.TryConnect(c, index) is { } device)
                         found.Add(device);
                 }
+                paired = ReceiverPairings.Read(c); // never throws: it only adds offline devices
+                if (paired != null)
+                    DiagnosticLog.Add($"{c.ProductName} has paired: {(paired.Count == 0 ? "nothing" : string.Join(", ", paired.Select(p => $"{p.Index}: {p.Name ?? "?"} ({p.Kind})")))}");
             }
         }
         catch (Exception e)
         {
-            DiagnosticLog.Add($"Couldn't list the devices on {c.ProductName}: {e.Message}");
-            return;
+            // Keep the devices found so far.
+            DiagnosticLog.Add($"Couldn't list all the devices on {c.ProductName}: {e.Message}");
         }
 
         foreach (var logi in found)
@@ -181,7 +181,13 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
             Try(device, () => RefreshAll(device));
         }
 
-        // Paired but switched off or asleep: show it offline and keep checking for it.
+        // Paired but switched off or asleep: show it offline and keep checking for it. When a device
+        // answered in a slot the receiver didn't list, its pairing information can't be trusted.
+        if (paired != null && found.Any(f => paired.All(p => p.Index != f.DeviceIndex)))
+        {
+            DiagnosticLog.Add($"{c.ProductName}'s pairing information doesn't match its devices; not showing offline ones");
+            paired = null;
+        }
         var offline = c.IsBluetooth && found.Count == 0
             ? [new PairedDevice(HidppConstants.WiredDeviceIndex, c.ProductName, DeviceKind.Unknown)]
             : paired?.Where(p => found.All(f => f.DeviceIndex != p.Index)) ?? [];
