@@ -91,7 +91,8 @@ public sealed class DeviceMonitor : IDisposable, IDeviceHost
     public DeviceMonitor()
     {
         _thread = new Thread(Run) { IsBackground = true, Name = "Device monitor" };
-        _providers = [new LogitechProvider(this), new Via.ViaProvider(this)];
+        // Keyboards first: they answer at once, while receivers are asked slot by slot.
+        _providers = [new Via.ViaProvider(this), new LogitechProvider(this)];
     }
 
     public void Start()

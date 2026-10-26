@@ -20,6 +20,9 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
     // A device that just reconnected may not answer straight away.
     private static readonly TimeSpan SettleDelay = TimeSpan.FromMilliseconds(400);
 
+    // How long to wait for each slot when looking for devices.
+    private const int ScanTimeoutMs = 250;
+
     public override IEnumerable<ManagedDevice> Devices => _devices;
 
     public override void Refresh()
@@ -31,6 +34,11 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
 
     public override void Poll()
     {
+        // A receiver with nothing found on it may have a device that was switched on without the
+        // receiver saying so (when connection notifications couldn't be turned on): look again.
+        foreach (var channel in _channels.Where(c => !c.Channel.IsBluetooth && _devices.All(d => d.Channel != c)).ToList())
+            Enumerate(channel);
+
         foreach (var device in _devices.ToList())
         {
             if (device.State.Awake)
@@ -118,10 +126,12 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
                 return;
             flags[1] |= HidppConstants.WirelessNotificationsFlag;
             channel.Channel.WriteRegister(HidppConstants.WiredDeviceIndex, HidppConstants.NotificationFlagsRegister, flags);
+            DiagnosticLog.Add($"Turned on connection notifications on {channel.Channel.ProductName}");
         }
-        catch (Exception)
+        catch (Exception e)
         {
-            // Not a receiver, or one that doesn't have the register. The wake probe still covers it.
+            // Not a receiver, or one that doesn't have the register. The wake probe and the poll still cover it.
+            DiagnosticLog.Add($"Couldn't turn on connection notifications on {channel.Channel.ProductName}: {e.Message}");
         }
     }
 
@@ -138,9 +148,14 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
         try
         {
             // A wired or Bluetooth HID++ 2.0 device answers at 0xFF. A receiver answers there too, but with a HID++ 1.0 error.
-            if (LogitechDevice.TryConnect(c, HidppConstants.WiredDeviceIndex) is { } direct)
+            // Devices answer within a few milliseconds, so a short wait keeps start-up quick on receivers
+            // with empty slots, which don't answer at all. One that is slow to answer is still noticed
+            // when it sends its first report.
+            if (LogitechDevice.TryConnect(c, HidppConstants.WiredDeviceIndex, ScanTimeoutMs) is { } direct)
             {
                 found.Add(direct);
+                Add(channel, direct);
+                Host.Publish();
             }
             else if (!c.IsBluetooth)
             {
@@ -148,8 +163,13 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
                 // the devices that are switched off, so a receiver that reports them oddly can't hide one.
                 for (byte index = 1; index <= 6; index++)
                 {
-                    if (LogitechDevice.TryConnect(c, index) is { } device)
+                    if (LogitechDevice.TryConnect(c, index, ScanTimeoutMs) is { } device)
+                    {
+                        // Show it now rather than after every other slot was asked.
                         found.Add(device);
+                        Add(channel, device);
+                        Host.Publish();
+                    }
                 }
                 paired = ReceiverPairings.Read(c); // never throws: it only adds offline devices
                 if (paired != null)
@@ -162,24 +182,6 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
             DiagnosticLog.Add($"Couldn't list all the devices on {c.ProductName}: {e.Message}");
         }
 
-        foreach (var logi in found)
-        {
-            var id = $"{channel.Channel.DevicePath}#{logi.DeviceIndex}";
-            var existing = _devices.FirstOrDefault(d => d.State.Id == id);
-            if (existing != null)
-            {
-                existing.Device = logi;
-                Try(existing, () => RefreshAll(existing));
-                continue;
-            }
-
-            DiagnosticLog.Add($"Found a HID++ {logi.ProtocolVersion} device at index 0x{logi.DeviceIndex:X2} on {channel.Channel.ProductName} ({logi.Connection})");
-            var device = new DeviceContext(this, channel, logi, new DeviceState(
-                id, "Logitech", "Logitech device", DeviceKind.Unknown, logi.IsWired, true, null, null, null, null, null, null,
-                Connection: logi.Connection));
-            _devices.Add(device);
-            Try(device, () => RefreshAll(device));
-        }
 
         // Paired but switched off or asleep: show it offline and keep checking for it. When a device
         // answered in a slot the receiver didn't list, its pairing information can't be trusted.
@@ -205,6 +207,26 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
             ScheduleWakeProbe(device);
         }
         Host.Publish();
+    }
+
+    /// <summary>Adds a device that answered, or updates the one already shown for that slot, and reads it.</summary>
+    private void Add(ChannelContext channel, LogitechDevice logi)
+    {
+        var id = $"{channel.Channel.DevicePath}#{logi.DeviceIndex}";
+        var existing = _devices.FirstOrDefault(d => d.State.Id == id);
+        if (existing != null)
+        {
+            existing.Device = logi;
+            Try(existing, () => RefreshAll(existing));
+            return;
+        }
+
+        DiagnosticLog.Add($"Found a HID++ {logi.ProtocolVersion} device at index 0x{logi.DeviceIndex:X2} on {channel.Channel.ProductName} ({logi.Connection})");
+        var device = new DeviceContext(this, channel, logi, new DeviceState(
+            id, "Logitech", "Logitech device", DeviceKind.Unknown, logi.IsWired, true, null, null, null, null, null, null,
+            Connection: logi.Connection));
+        _devices.Add(device);
+        Try(device, () => RefreshAll(device));
     }
 
     /// <summary>Marks a device asleep, keeping what we last read from it, and starts checking for it to wake up.</summary>
@@ -471,7 +493,7 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
                 }
                 else
                 {
-                    Enumerate(channel); // a device we haven't seen yet
+                    LookForNewDevice(channel, deviceIndex);
                 }
             });
             return;
@@ -483,11 +505,35 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
         var index = report[1];
         var feature = report[2];
         var function = report[3] >> 4;
+        // Only a HID++ 2.0 event from a device says it is there; error answers to our pings don't.
+        var fromDevice = report[0] == HidppConstants.LongReportId && index is >= 1 and <= 6
+            && feature != HidppConstants.Hidpp20ErrorMarker && feature != HidppConstants.Hidpp10ErrorMarker;
         Host.Enqueue(() =>
         {
             // The device list belongs to the monitor thread, so look the device up there.
             var target = _devices.FirstOrDefault(d => d.Channel == channel && d.Device.DeviceIndex == index);
-            if (target == null) return;
+            // A device talking on its own has just been switched on or woken up. This is how a device is
+            // noticed on receivers that refuse to send connection notifications (such as the C54D Lightspeed).
+            if (target == null)
+            {
+                if (fromDevice)
+                    LookForNewDevice(channel, index);
+                return;
+            }
+            if (!target.State.Awake)
+            {
+                if (fromDevice && !target.WakePending)
+                {
+                    target.WakePending = true;
+                    After(SettleDelay, () =>
+                    {
+                        target.WakePending = false;
+                        if (_devices.Contains(target) && !target.State.Awake)
+                            Try(target, () => Wake(target));
+                    });
+                }
+                return;
+            }
             if (feature == target.ReprogFeatureIndex && function == 0)
             {
                 var held = new HashSet<int>();
@@ -504,6 +550,40 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
                 Try(target, () => RefreshDpi(target, raiseEvent: true));
             else if (feature == target.BatteryFeatureIndex)
                 Try(target, () => RefreshBattery(target));
+        });
+    }
+
+    /// <summary>
+    /// Looks for a device that just appeared on a receiver. It may not answer straight after connecting,
+    /// so look once it has settled, and again a little later if it still didn't answer.
+    /// </summary>
+    private void LookForNewDevice(ChannelContext channel, byte deviceIndex)
+    {
+        if (channel.LookingForNewDevice) return; // a device sends several reports when it connects
+        channel.LookingForNewDevice = true;
+        bool Found() => _devices.Any(d => d.Channel == channel && d.Device.DeviceIndex == deviceIndex);
+        // Ask just that slot: asking all of them waits for every switched-off slot to time out.
+        void TryAdd()
+        {
+            if (_channels.Contains(channel) && !Found() && LogitechDevice.TryConnect(channel.Channel, deviceIndex) is { } logi)
+            {
+                Add(channel, logi);
+                Host.Publish();
+            }
+        }
+        After(SettleDelay, () =>
+        {
+            TryAdd();
+            if (!_channels.Contains(channel) || Found())
+            {
+                channel.LookingForNewDevice = false;
+                return;
+            }
+            After(TimeSpan.FromSeconds(3), () =>
+            {
+                channel.LookingForNewDevice = false;
+                TryAdd();
+            });
         });
     }
 
@@ -573,6 +653,7 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
     private sealed class ChannelContext(HidppChannel channel)
     {
         public HidppChannel Channel { get; } = channel;
+        public bool LookingForNewDevice { get; set; }
     }
 
     private sealed class DeviceContext(LogitechProvider provider, ChannelContext channel, LogitechDevice device, DeviceState state)
@@ -592,6 +673,7 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
         public bool NeedsRestore { get; set; } = true;
         public bool SuppressNextDpiEvent { get; set; }
         public bool WakeProbeScheduled { get; set; }
+        public bool WakePending { get; set; }
 
         public override void SetDpi(int dpi)
         {
