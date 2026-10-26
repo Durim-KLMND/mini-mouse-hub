@@ -170,6 +170,7 @@ internal sealed class DevicePage
     private readonly TextBlock _dpiHint = Ui.Text("", 12, "Muted");
     private readonly Border _dpiCard;
     private readonly Border _batteryCard;
+    private readonly HardwareKeysCard _keys;
     private readonly TextBlock _note = Ui.Text("", 13);
     private readonly Border _noteCard;
     private readonly LightingCard _lighting;
@@ -177,7 +178,7 @@ internal sealed class DevicePage
 
     public UIElement Root { get; }
 
-    public DevicePage(DeviceMonitor monitor, DeviceState device, Action openKeyTester)
+    public DevicePage(DeviceMonitor monitor, DeviceState device, AppSettings settings, Action openKeyTester)
     {
         _monitor = monitor;
         _device = device;
@@ -255,6 +256,8 @@ internal sealed class DevicePage
         tester.Children.Add(testerRow);
         _testerCard = Ui.Card(tester);
         right.Children.Add(_testerCard);
+        _keys = new HardwareKeysCard(monitor, device, settings);
+        right.Children.Add(_keys.Root);
 
         layout.Children.Add(right);
         Root = layout;
@@ -315,6 +318,8 @@ internal sealed class DevicePage
             var where = device.Mode == OnboardMode.Onboard ? "Saved to the highlighted slot on the mouse" : "Applied right away";
             _dpiHint.Text = $"{caps.Min}-{caps.Max}. {where}.";
         }
+
+        _keys.Update(device);
     }
 
     private async Task SelectSlot(int slot)
@@ -379,6 +384,7 @@ internal sealed class LightingCard
     private readonly Slider _brightness = NewSlider();
     private readonly Slider _speed = NewSlider();
     private readonly ColorPicker _color = new();
+    private readonly StackPanel _colorRow;
     private readonly TextBlock _hint = Ui.Text("", 12, "Muted");
     private readonly System.Windows.Threading.DispatcherTimer _sendTimer = new() { Interval = SendDelay };
     private IReadOnlyList<string>? _effectNames;
@@ -398,7 +404,8 @@ internal sealed class LightingCard
         panel.Children.Add(Row("Effect", _effect));
         panel.Children.Add(Row("Brightness", _brightness));
         panel.Children.Add(Row("Speed", _speed));
-        panel.Children.Add(Row("Color", _color.Root));
+        _colorRow = Row("Color", _color.Root);
+        panel.Children.Add(_colorRow);
         _hint.Margin = new Thickness(0, 10, 0, 0);
         panel.Children.Add(_hint);
         Root = Ui.Card(panel);
@@ -448,6 +455,7 @@ internal sealed class LightingCard
             _effectNames = lighting.EffectNames;
             _effect.ItemsSource = lighting.EffectNames;
         }
+        _colorRow.Visibility = lighting.HasColor ? Visibility.Visible : Visibility.Collapsed;
         var settings = lighting.Settings;
         _on.IsChecked = !settings.IsOff;
         if (!settings.IsOff)

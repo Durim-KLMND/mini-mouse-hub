@@ -26,6 +26,9 @@ public record DeviceState(
     public bool HasDpi => DpiCapabilities != null;
     public bool HasLighting => Lighting != null;
 
+    /// <summary>The keymap of a keyboard whose keys can be changed, so keys such as the lighting key can be turned off.</summary>
+    public Via.KeymapState? Keymap { get; init; }
+
     /// <summary>Brand and model, such as "Logitech PRO X Superlight 2", so devices can be told apart at a glance.</summary>
     public string DisplayName => DeviceNames.Display(Vendor, Name);
 }
@@ -100,6 +103,12 @@ public sealed class DeviceMonitor : IDisposable, IDeviceHost
 
     /// <summary>Switches to another DPI slot of the active onboard profile, like pressing the DPI button.</summary>
     public Task SelectDpiSlotAsync(string deviceId, int slot) => RunOnDevice(deviceId, d => d.SelectDpiSlot(slot));
+
+    /// <summary>Changes what a key does, such as setting it to do nothing. The keyboard saves it right away.</summary>
+    public Task SetKeycodeAsync(string deviceId, Via.KeyPosition key, ushort keycode) => RunOnDevice(deviceId, d => d.SetKeycode(key, keycode));
+
+    /// <summary>Puts every key back to what the keyboard's firmware does by default.</summary>
+    public Task ResetKeymapAsync(string deviceId) => RunOnDevice(deviceId, d => d.ResetKeymap());
 
     /// <summary>Changes a keyboard's lighting and saves it on the keyboard.</summary>
     public Task SetLightingAsync(string deviceId, LightingSettings lighting) => RunOnDevice(deviceId, d => d.SetLighting(lighting));
@@ -233,6 +242,10 @@ public abstract class ManagedDevice(DeviceState state)
     public virtual void SetDpi(int dpi) => throw new NotSupportedException($"{State.Name} has no adjustable DPI.");
 
     public virtual void SelectDpiSlot(int slot) => throw new NotSupportedException($"{State.Name} has no DPI slots.");
+
+    public virtual void SetKeycode(Via.KeyPosition key, ushort keycode) => throw new NotSupportedException($"{State.Name}'s keys can't be changed.");
+
+    public virtual void ResetKeymap() => throw new NotSupportedException($"{State.Name}'s keys can't be changed.");
 
     public virtual void SetLighting(LightingSettings lighting) => throw new NotSupportedException($"{State.Name}'s lighting can't be changed.");
 }

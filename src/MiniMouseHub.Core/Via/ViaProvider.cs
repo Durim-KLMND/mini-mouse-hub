@@ -3,13 +3,15 @@ using HidSharp;
 namespace MiniMouseHub.Core.Via;
 
 /// <summary>
-/// Finds keyboards running QMK with VIA (any brand), and Glorious keyboards still on their stock
-/// firmware, which get a tile that explains how to unlock their settings.
+/// Finds keyboards running QMK with VIA (any brand, including most Keychron boards), and Glorious
+/// and Keychron keyboards the app can't talk to, which get a tile that explains why.
 /// </summary>
 internal sealed class ViaProvider(IDeviceHost host) : DeviceProvider(host)
 {
     private const uint RawHidUsage = 0xFF60_0061;
     private const int GloriousVendorId = 0x320F;
+    private const uint KeyboardUsage = 0x0001_0006;
+    private const uint MouseUsage = 0x0001_0002;
 
     private readonly List<ViaDevice> _devices = new();
 
@@ -37,11 +39,16 @@ internal sealed class ViaProvider(IDeviceHost host) : DeviceProvider(host)
         var found = new List<(string Id, HidDevice? Interface, HidDevice Any)>();
         foreach (var device in via)
             found.Add(($"via:{device.DevicePath}", device, device));
-        foreach (var stock in hid.Where(d => d.VendorID == GloriousVendorId).GroupBy(d => (d.VendorID, d.ProductID)))
+        var stocks = hid.Where(d => d.VendorID is GloriousVendorId or ViaEffects.KeychronVendorId).GroupBy(d => (d.VendorID, d.ProductID));
+        foreach (var stock in stocks)
         {
             if (via.Any(v => (v.VendorID, v.ProductID) == stock.Key))
                 continue;
-            found.Add(($"glorious:{stock.Key.VendorID:X4}:{stock.Key.ProductID:X4}", null, stock.First()));
+            // Keychron also makes mice and receivers; only keyboards get a tile.
+            if (stock.Key.VendorID == ViaEffects.KeychronVendorId && !IsKeyboard(stock))
+                continue;
+            var brand = stock.Key.VendorID == GloriousVendorId ? "glorious" : "keychron";
+            found.Add(($"{brand}:{stock.Key.VendorID:X4}:{stock.Key.ProductID:X4}", null, stock.First()));
         }
 
         var changed = _devices.RemoveAll(d =>
@@ -83,6 +90,16 @@ internal sealed class ViaProvider(IDeviceHost host) : DeviceProvider(host)
         }
     }
 
+    private static bool IsKeyboard(IEnumerable<HidDevice> interfaces)
+    {
+        var usages = interfaces.SelectMany(d =>
+        {
+            try { return d.GetReportDescriptor().DeviceItems.SelectMany(item => item.Usages.GetAllValues()); }
+            catch { return []; }
+        }).ToHashSet();
+        return usages.Contains(KeyboardUsage) && !usages.Contains(MouseUsage);
+    }
+
     private void Try(ViaDevice device, Action action)
     {
         try
@@ -117,14 +134,23 @@ internal sealed class ViaDevice : ManagedDevice, IDisposable
     private readonly ViaProvider _provider;
     private readonly HidStream? _stream;
     private readonly ViaKeyboard? _keyboard;
-    private readonly IReadOnlyList<string> _effectNames;
+    private readonly int _vendorId;
+    private readonly int _productId;
+    private IReadOnlyList<string> _effectNames;
     private int? _protocol;
+    private bool _lightingChecked;
+    private LightingChannel? _channel;
+    private bool _effectsCounted;
+    private bool _keymapChecked;
+    private KeymapState? _keymap;
 
-    private ViaDevice(ViaProvider provider, DeviceState state, HidStream? stream, IReadOnlyList<string> effectNames) : base(state)
+    private ViaDevice(ViaProvider provider, DeviceState state, HidStream? stream, HidDevice device) : base(state)
     {
         _provider = provider;
         _stream = stream;
-        _effectNames = effectNames;
+        _vendorId = device.VendorID;
+        _productId = device.ProductID;
+        _effectNames = ViaEffects.For(_vendorId, _productId);
         if (stream != null)
             _keyboard = new ViaKeyboard(Exchange);
     }
@@ -135,15 +161,18 @@ internal sealed class ViaDevice : ManagedDevice, IDisposable
             return null;
         stream.ReadTimeout = (int)ReplyTimeout.TotalMilliseconds;
         var (vendor, name) = Names(device);
-        return new ViaDevice(provider, NewState(id, vendor, name, null), stream, ViaEffects.For(device.VendorID, device.ProductID));
+        return new ViaDevice(provider, NewState(id, vendor, name, null), stream, device);
     }
 
     /// <summary>A keyboard we recognise but can't talk to yet.</summary>
     public static ViaDevice Stock(ViaProvider provider, string id, HidDevice device)
     {
         var (vendor, name) = Names(device);
-        return new ViaDevice(provider, NewState(id, vendor, name,
-            "This keyboard runs Glorious's stock firmware. Flash QMK with VIA to change its lighting and keys here."), null, []);
+        var note = device.VendorID == ViaEffects.KeychronVendorId
+            ? "This Keychron keyboard isn't answering VIA. Connect it with the USB cable and set its switch to cable mode. " +
+              "Keychron keyboards without QMK firmware, such as the original K and C series, can't be changed here."
+            : "This keyboard runs Glorious's stock firmware. Flash QMK with VIA to change its lighting and keys here.";
+        return new ViaDevice(provider, NewState(id, vendor, name, note), null, device);
     }
 
     private static DeviceState NewState(string id, string vendor, string name, string? note) =>
@@ -160,33 +189,99 @@ internal sealed class ViaDevice : ManagedDevice, IDisposable
             if (device.ProductID == 0x5044)
                 name = "GMMK Pro"; // stock firmware and QMK report it differently
         }
+        if (device.VendorID == ViaEffects.KeychronVendorId && string.IsNullOrWhiteSpace(vendor))
+            vendor = "Keychron";
         return (string.IsNullOrWhiteSpace(vendor) ? "Keyboard" : vendor.Trim(),
                 string.IsNullOrWhiteSpace(name) ? $"Keyboard {device.VendorID:X4}:{device.ProductID:X4}" : name.Trim());
     }
 
-    /// <summary>Re-reads the lighting.</summary>
+    /// <summary>Re-reads the lighting, and the keymap the first time.</summary>
     public void Read()
     {
         if (_keyboard == null) return;
         _protocol ??= _keyboard.GetProtocolVersion();
         if (_protocol < ViaKeyboard.MinLightingProtocol)
         {
-            _provider.Changed(this, State with { Note = $"This keyboard's VIA firmware is too old (protocol {_protocol}). Update it to change lighting here." });
+            _provider.Changed(this, State with { Note = $"This keyboard's VIA firmware is too old (protocol {_protocol}). Update it to change lighting and keys here." });
             return;
         }
 
-        LightingState? lighting;
-        try { lighting = new LightingState(_keyboard.GetLighting(), _effectNames); }
-        catch (ViaException) { lighting = null; } // no RGB matrix on this keyboard
-        _provider.Changed(this, State with { Lighting = lighting });
+        var lighting = ReadLighting();
+        if (!_keymapChecked)
+        {
+            _keymapChecked = true;
+            try
+            {
+                var keymap = _keyboard.ReadKeymap();
+                _keymap = new KeymapState($"{_vendorId:X4}:{_productId:X4}", keymap,
+                    HardwareKeys.DescribeLayers(keymap, macWindowsPairs: _vendorId == ViaEffects.KeychronVendorId));
+            }
+            catch (ViaException) { } // no dynamic keymap
+        }
+        _provider.Changed(this, State with { Lighting = lighting, Keymap = _keymap });
+    }
+
+    private LightingState? ReadLighting()
+    {
+        var keyboard = _keyboard!;
+        if (!_lightingChecked)
+        {
+            // Per-key RGB first, then single-color backlights such as white-backlit Keychron boards.
+            foreach (var channel in new[] { LightingChannel.RgbMatrix, LightingChannel.LedMatrix })
+            {
+                try
+                {
+                    keyboard.GetLighting(channel);
+                    _channel = channel;
+                    break;
+                }
+                catch (ViaException) { }
+            }
+            _lightingChecked = true;
+        }
+        if (_channel is not { } found)
+            return null;
+
+        if (!_effectsCounted && ViaEffects.NeedsCount(_vendorId, _productId))
+        {
+            if (keyboard.CountEffects(found) is { } count)
+            {
+                _effectsCounted = true;
+                _effectNames = ViaEffects.For(_vendorId, _productId, count);
+            }
+        }
+        try { return new LightingState(keyboard.GetLighting(found), _effectNames, HasColor: found == LightingChannel.RgbMatrix); }
+        catch (ViaException) { return null; }
     }
 
     public override void SetLighting(LightingSettings lighting)
     {
-        if (_keyboard == null || State.Lighting == null)
+        if (_keyboard == null || _channel == null)
             base.SetLighting(lighting);
-        _keyboard!.SetLighting(lighting);
+        _keyboard!.SetLighting(lighting, _channel!.Value);
         Read();
+    }
+
+    public override void SetKeycode(KeyPosition key, ushort keycode)
+    {
+        if (_keyboard == null || _keymap == null)
+            base.SetKeycode(key, keycode);
+        _keyboard!.SetKeycode(key.Layer, key.Row, key.Column, keycode);
+        // Read it back rather than trusting the write.
+        var stored = _keyboard.GetKeycode(key.Layer, key.Row, key.Column);
+        _keymap = _keymap! with { Keymap = _keymap.Keymap.With(key.Layer, key.Row, key.Column, stored) };
+        _provider.Changed(this, State with { Keymap = _keymap });
+        if (stored != keycode)
+            throw new ViaException("The keyboard didn't keep the change.");
+    }
+
+    public override void ResetKeymap()
+    {
+        if (_keyboard == null || _keymap == null)
+            base.ResetKeymap();
+        _keyboard!.ResetKeymap();
+        _keymap = _keymap! with { Keymap = _keyboard.ReadKeymap() };
+        _provider.Changed(this, State with { Keymap = _keymap });
     }
 
     private byte[] Exchange(byte[] report)

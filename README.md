@@ -9,6 +9,7 @@ Mini mouse hub is a small Windows app for checking and changing your gaming gear
 - Shows a tile for every connected device, with its battery level and whether it's charging
 - Reads and changes the mouse's DPI, including the onboard DPI slots
 - Changes keyboard lighting on keyboards running QMK with VIA firmware
+- Turns off keyboard keys you keep hitting by accident, such as the lighting key or the Windows key
 - Warns you when the battery runs low (20%, 10% and 5%) and when the DPI is changed with the mouse's button
 - Runs in the tray, can start with Windows, and has light and dark themes
 - Updates itself from this repository's GitHub releases (can be turned off in Settings)
@@ -28,6 +29,7 @@ Once installed, the app keeps itself up to date, so you only run the installer o
 | Logitech PRO X Superlight 2 | Lightspeed receiver or cable | Battery, charging, DPI and DPI slots, notifications | Supported and tested |
 | Other Logitech mice that speak HID++ 2.0 | Lightspeed receiver or cable | Battery and DPI, where the mouse offers them | Should work, not tested |
 | Glorious GMMK Pro keyboard (with QMK/VIA firmware) | Cable | Lighting (on/off, effect, brightness, speed, color) | Supported, not tested on hardware yet |
+| Keychron Q, V, K Pro, Q Max and other QMK/VIA keyboards | Cable | Lighting (RGB or white backlight), turning keys off | Supported, not tested on hardware yet |
 
 ## Not supported yet
 
@@ -97,6 +99,14 @@ Every push to `main` runs `.github/workflows/release.yml`, which tests, builds `
 ## Glorious GMMK Pro
 
 On its stock firmware the GMMK Pro shows up with a note but can't be changed, because Glorious's protocol isn't documented. Flash QMK with the `via` keymap (from [VIA's QMK userspace](https://github.com/the-via/qmk_userspace_via)) to unlock lighting here; [Glorious's QMK guide](https://www.gloriousgaming.com/blogs/guides-resources/step-by-step-guide-to-configuring-your-gmmk-pro-using-qmk) covers flashing and going back to stock.
+
+## Keychron
+
+Keychron's QMK keyboards (the Q, V, K Pro, Q Max and V Max series, among others) speak VIA, so they work out of the box. Connect them with the USB cable and set the switch to cable mode: over Bluetooth or the 2.4 GHz receiver most of them don't answer VIA, and the app shows a note instead. Older Keychron keyboards without QMK (the original K and C series) can't be changed.
+
+VIA can't list a keyboard's lighting effects, so the app asks how many there are and names them when the count matches Keychron's usual set; otherwise they're numbered.
+
+Under **Hardware keys**, untick a key to turn it off. The app finds lighting keys on every layer (on Keychron boards, on both the Mac and Windows layers) and the Windows, Caps Lock, Insert and Menu keys on the base layers. A key is turned off by setting it to do nothing (`KC_NO`) in the keyboard's own keymap, so it stays off without the app; what it did before is kept in the settings so it can be turned back on. **Restore default keys** puts the whole keymap back to the firmware's default.
 
 ## Device pictures
 
