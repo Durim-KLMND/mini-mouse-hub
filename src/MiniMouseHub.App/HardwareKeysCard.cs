@@ -140,28 +140,20 @@ internal sealed class HardwareKeysCard
         return box;
     }
 
-    /// <summary>What the app turned off on this model, as position to the keycode it had, dropping keys that were changed since.</summary>
+    /// <summary>
+    /// What the app turned off on this model, as position to the keycode it had. Entries are never
+    /// dropped here: right after a key is turned off the page can still hold the keymap from before,
+    /// and dropping the entry then would lose what the key did. Turning a key on removes its entry.
+    /// </summary>
     private Dictionary<KeyPosition, ushort> Disabled(KeymapState keymap)
     {
         var result = new Dictionary<KeyPosition, ushort>();
         if (!_settings.DisabledKeys.TryGetValue(keymap.Model, out var stored))
             return result;
-        var stale = new List<string>();
         foreach (var (text, code) in stored)
         {
-            if (KeyPosition.Parse(text) is { } key && key.Layer < keymap.Keymap.Layers && key.Row < keymap.Keymap.Rows &&
-                key.Column < keymap.Keymap.Columns && keymap.Keymap[key.Layer, key.Row, key.Column] == QmkKeycodes.None)
-                result[key] = code;
-            else
-                stale.Add(text); // turned back on somewhere else, such as in VIA
-        }
-        if (stale.Count > 0)
-        {
-            foreach (var text in stale)
-                stored.Remove(text);
-            if (stored.Count == 0)
-                _settings.DisabledKeys.Remove(keymap.Model);
-            _settings.Save();
+            if (KeyPosition.Parse(text) is { } key)
+                result[key] = code; // only used where the key reads as KC_NO
         }
         return result;
     }
@@ -216,6 +208,8 @@ internal sealed class HardwareKeysCard
 
     private async Task Run(Func<Task<string>> change)
     {
+        var before = _device.Keymap;
+        var failed = false;
         _busy = true;
         Root.IsEnabled = false;
         _hint.Text = "Saving on the keyboard…";
@@ -225,14 +219,18 @@ internal sealed class HardwareKeysCard
         }
         catch (Exception ex)
         {
+            failed = true;
             _hint.Text = $"Couldn't change the key: {ex.Message}";
         }
         finally
         {
             _busy = false;
             Root.IsEnabled = true;
-            _shown = null; // show what the keyboard has now
-            Update(_device);
+            // Show what the keyboard has now. If its new keymap hasn't reached the page yet, keep the
+            // ticks as they are; the next update redraws the list from it.
+            _shown = null;
+            if (failed || !ReferenceEquals(_device.Keymap, before))
+                Update(_device);
         }
     }
 }
