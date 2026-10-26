@@ -20,6 +20,9 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
     // A device that just reconnected may not answer straight away.
     private static readonly TimeSpan SettleDelay = TimeSpan.FromMilliseconds(400);
 
+    // How long to wait for each slot when looking for devices.
+    private const int ScanTimeoutMs = 250;
+
     public override IEnumerable<ManagedDevice> Devices => _devices;
 
     public override void Refresh()
@@ -145,9 +148,14 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
         try
         {
             // A wired or Bluetooth HID++ 2.0 device answers at 0xFF. A receiver answers there too, but with a HID++ 1.0 error.
-            if (LogitechDevice.TryConnect(c, HidppConstants.WiredDeviceIndex) is { } direct)
+            // Devices answer within a few milliseconds, so a short wait keeps start-up quick on receivers
+            // with empty slots, which don't answer at all. One that is slow to answer is still noticed
+            // when it sends its first report.
+            if (LogitechDevice.TryConnect(c, HidppConstants.WiredDeviceIndex, ScanTimeoutMs) is { } direct)
             {
                 found.Add(direct);
+                Add(channel, direct);
+                Host.Publish();
             }
             else if (!c.IsBluetooth)
             {
@@ -155,8 +163,13 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
                 // the devices that are switched off, so a receiver that reports them oddly can't hide one.
                 for (byte index = 1; index <= 6; index++)
                 {
-                    if (LogitechDevice.TryConnect(c, index) is { } device)
+                    if (LogitechDevice.TryConnect(c, index, ScanTimeoutMs) is { } device)
+                    {
+                        // Show it now rather than after every other slot was asked.
                         found.Add(device);
+                        Add(channel, device);
+                        Host.Publish();
+                    }
                 }
                 paired = ReceiverPairings.Read(c); // never throws: it only adds offline devices
                 if (paired != null)
@@ -169,8 +182,6 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
             DiagnosticLog.Add($"Couldn't list all the devices on {c.ProductName}: {e.Message}");
         }
 
-        foreach (var logi in found)
-            Add(channel, logi);
 
         // Paired but switched off or asleep: show it offline and keep checking for it. When a device
         // answered in a slot the receiver didn't list, its pairing information can't be trusted.

@@ -58,13 +58,13 @@ public sealed class LogitechDevice
     public bool IsOffline => ProtocolVersion.Major == 0;
 
     /// <summary>Pings a device; returns it when it answers as a HID++ 2.0 device.</summary>
-    public static LogitechDevice? TryConnect(HidppChannel channel, byte deviceIndex)
+    public static LogitechDevice? TryConnect(HidppChannel channel, byte deviceIndex, int timeoutMs = 700)
     {
         const byte pingData = 0x5A;
         try
         {
             // Root feature (index 0), function 1 = getProtocolVersion.
-            var response = channel.Request(deviceIndex, 0x00, 1, [0, 0, pingData], timeoutMs: 700);
+            var response = channel.Request(deviceIndex, 0x00, 1, [0, 0, pingData], timeoutMs);
             if (response[2] != pingData || response[0] < 2)
                 return null;
             return new LogitechDevice(channel, deviceIndex, new Version(response[0], response[1]));
