@@ -1,3 +1,4 @@
+using System.Text;
 using MiniMouseHub.Core.Hidpp;
 
 namespace MiniMouseHub.Core;
@@ -5,6 +6,8 @@ namespace MiniMouseHub.Core;
 /// <summary>
 /// Finds every Logitech HID++ device (through receivers or cables), polls their batteries, and
 /// listens for the notifications they send (DPI button presses, battery changes, sleep and wake).
+/// Mice without onboard profiles (the Logi Options family, such as the MX Master) forget settings
+/// when they reconnect, so the settings the app set are kept and set again each time they connect.
 /// </summary>
 internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
 {
@@ -48,11 +51,19 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
         {
             MarkAsleep(device);
         }
-        catch (HidppException)
+        catch (HidppException e)
         {
+            DiagnosticLog.Add($"{device.State.Name}: {e.Message}");
         }
-        catch (Exception)
+        catch (IOException e) when (device.Channel.Channel.IsBluetooth)
         {
+            // Windows keeps a Bluetooth device's HID collection while it's asleep, but writes to it fail.
+            DiagnosticLog.Add($"{device.State.Name}: {e.Message}");
+            MarkAsleep(device);
+        }
+        catch (Exception e)
+        {
+            DiagnosticLog.Add($"{device.State.Name}: dropping {device.Channel.Channel.ProductName} after {e}");
             DropChannel(device.Channel);
         }
     }
@@ -73,8 +84,16 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
                 continue;
             HidppChannel opened;
             try { opened = new HidppChannel(group); }
-            catch (Exception) { continue; }
+            catch (Exception e)
+            {
+                DiagnosticLog.Add($"Couldn't open {group[0].DevicePath}: {e.Message}");
+                continue;
+            }
 
+            var label = $"{opened.ProductName} ({opened.ProductId:X4})";
+            DiagnosticLog.Add($"Opened {label}{(opened.IsBluetooth ? " over Bluetooth" : "")}: {opened.DevicePath}");
+            opened.ReportSent += report => DiagnosticLog.Report("→", label, report);
+            opened.ReportReceived += report => DiagnosticLog.Report("←", label, report);
             var context = new ChannelContext(opened);
             opened.ReportReceived += report => OnReport(context, report);
             _channels.Add(context);
@@ -90,7 +109,7 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
     /// </summary>
     private void EnableConnectionNotifications(ChannelContext channel)
     {
-        if (_devices.Any(d => d.Channel == channel && d.Device.IsWired))
+        if (channel.Channel.IsBluetooth || _devices.Any(d => d.Channel == channel && d.Device.IsWired))
             return;
         try
         {
@@ -106,12 +125,42 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
         }
     }
 
-    /// <summary>Finds the devices behind a receiver (or the wired device itself) and adds any new ones.</summary>
+    /// <summary>
+    /// Finds the devices behind a receiver (or the wired or Bluetooth device itself) and adds any new
+    /// ones. Devices paired with a receiver are added even when they are switched off, so they show
+    /// as offline straight away and come online as soon as they connect.
+    /// </summary>
     private void Enumerate(ChannelContext channel)
     {
-        List<LogitechDevice> found;
-        try { found = LogitechDevice.Enumerate(channel.Channel); }
-        catch (Exception) { return; }
+        var c = channel.Channel;
+        var found = new List<LogitechDevice>();
+        List<PairedDevice>? paired = null;
+        try
+        {
+            // A wired or Bluetooth HID++ 2.0 device answers at 0xFF. A receiver answers there too, but with a HID++ 1.0 error.
+            if (LogitechDevice.TryConnect(c, HidppConstants.WiredDeviceIndex) is { } direct)
+            {
+                found.Add(direct);
+            }
+            else if (!c.IsBluetooth)
+            {
+                paired = ReceiverPairings.Read(c);
+                if (paired != null)
+                    DiagnosticLog.Add($"{c.ProductName} has paired: {(paired.Count == 0 ? "nothing" : string.Join(", ", paired.Select(p => $"{p.Index}: {p.Name ?? "?"} ({p.Kind})")))}");
+                // Only ask the slots that hold a device, when the receiver says which they are.
+                var indexes = paired is { Count: > 0 } ? paired.Select(p => p.Index) : [1, 2, 3, 4, 5, 6];
+                foreach (var index in indexes)
+                {
+                    if (LogitechDevice.TryConnect(c, index) is { } device)
+                        found.Add(device);
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            DiagnosticLog.Add($"Couldn't list the devices on {c.ProductName}: {e.Message}");
+            return;
+        }
 
         foreach (var logi in found)
         {
@@ -124,10 +173,30 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
                 continue;
             }
 
+            DiagnosticLog.Add($"Found a HID++ {logi.ProtocolVersion} device at index 0x{logi.DeviceIndex:X2} on {channel.Channel.ProductName} ({logi.Connection})");
             var device = new DeviceContext(this, channel, logi, new DeviceState(
-                id, "Logitech", "Logitech device", DeviceKind.Unknown, logi.IsWired, true, null, null, null, null, null, null));
+                id, "Logitech", "Logitech device", DeviceKind.Unknown, logi.IsWired, true, null, null, null, null, null, null,
+                Connection: logi.Connection));
             _devices.Add(device);
             Try(device, () => RefreshAll(device));
+        }
+
+        // Paired but switched off or asleep: show it offline and keep checking for it.
+        var offline = c.IsBluetooth && found.Count == 0
+            ? [new PairedDevice(HidppConstants.WiredDeviceIndex, c.ProductName, DeviceKind.Unknown)]
+            : paired?.Where(p => found.All(f => f.DeviceIndex != p.Index)) ?? [];
+        foreach (var p in offline)
+        {
+            var id = $"{c.DevicePath}#{p.Index}";
+            if (_devices.Any(d => d.State.Id == id))
+                continue;
+            var logi = LogitechDevice.Offline(c, p.Index);
+            DiagnosticLog.Add($"{p.Name ?? "A device"} at index 0x{p.Index:X2} on {c.ProductName} is paired but offline");
+            var device = new DeviceContext(this, channel, logi, new DeviceState(
+                id, "Logitech", p.Name ?? "Logitech device", p.Kind, false, false, null, null, null, null, null, null,
+                Connection: logi.Connection));
+            _devices.Add(device);
+            ScheduleWakeProbe(device);
         }
         Host.Publish();
     }
@@ -135,6 +204,10 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
     /// <summary>Marks a device asleep, keeping what we last read from it, and starts checking for it to wake up.</summary>
     private void MarkAsleep(DeviceContext device)
     {
+        if (device.State.Awake)
+            DiagnosticLog.Add($"{device.State.Name} went to sleep or disconnected");
+        device.NeedsRestore = true;
+        device.PressedControls.Clear();
         Update(device, device.State with { Awake = false });
         ScheduleWakeProbe(device);
     }
@@ -159,8 +232,21 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
 
     private void Wake(DeviceContext device)
     {
-        // A cheap ping; if it answers, the device is back.
-        device.Channel.Channel.Request(device.Device.DeviceIndex, 0x00, 1, [0, 0, 0x5A], timeoutMs: 700);
+        // A cheap ping; if it answers, the device is back. A receiver answers for a device that is
+        // switched off with an error, which means the same as no answer.
+        try
+        {
+            device.Channel.Channel.Request(device.Device.DeviceIndex, 0x00, 1, [0, 0, 0x5A], timeoutMs: 700);
+        }
+        catch (HidppErrorException e)
+        {
+            throw new HidppTimeoutException($"{device.State.Name} isn't connected ({e.Message}).");
+        }
+        if (device.Device.IsOffline && LogitechDevice.TryConnect(device.Channel.Channel, device.Device.DeviceIndex) is { } connected)
+        {
+            DiagnosticLog.Add($"{device.State.Name} came online (HID++ {connected.ProtocolVersion})");
+            device.Device = connected;
+        }
         RefreshAll(device);
     }
 
@@ -181,6 +267,8 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
         device.BatteryFeatureIndex = d.GetFeatureIndex(FeatureId.UnifiedBattery)
             ?? d.GetFeatureIndex(FeatureId.BatteryVoltage) ?? d.GetFeatureIndex(FeatureId.BatteryStatus);
         device.OnboardFeatureIndex = d.GetFeatureIndex(FeatureId.OnboardProfiles);
+        device.ReprogFeatureIndex = d.GetFeatureIndex(FeatureId.ReprogControls);
+        device.SmartShiftFeatureIndex = d.GetFeatureIndex(FeatureId.SmartShiftEnhanced) ?? d.GetFeatureIndex(FeatureId.SmartShift);
 
         var name = device.State.Name;
         var kind = device.State.Kind;
@@ -197,9 +285,98 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
             Awake = true,
             DpiCapabilities = d.HasAdjustableDpi ? d.GetDpiCapabilities() : null,
         });
+        if (device.NeedsRestore)
+        {
+            device.NeedsRestore = false;
+            RestoreSettings(device);
+        }
         if (device.BatteryFeatureIndex != null)
             RefreshBattery(device);
         RefreshDpi(device, raiseEvent: false);
+        // Newer features: if one misbehaves, the rest of the device should still work.
+        foreach (var (what, read) in new (string, Action)[] { ("scroll settings", () => RefreshScroll(device)), ("buttons", () => RefreshButtons(device)) })
+        {
+            try { read(); }
+            catch (HidppErrorException e) { DiagnosticLog.Add($"{device.State.Name}: couldn't read {what}: {e.Message}"); }
+        }
+    }
+
+    private void RefreshScroll(DeviceContext device)
+    {
+        Update(device, device.State with { Scroll = device.Device.GetScrollSettings() });
+    }
+
+    // Left and right click are never offered, so the mouse can't be made unusable.
+    private static readonly HashSet<int> ProtectedControls = [0x0050, 0x0051];
+
+    private void RefreshButtons(DeviceContext device)
+    {
+        // Mice with onboard profiles keep their buttons in the profile instead.
+        if (device.ReprogFeatureIndex == null || device.OnboardFeatureIndex != null)
+            return;
+        var d = device.Device;
+        device.Controls ??= d.GetControls();
+        var actions = Remembered(device).Actions;
+
+        var buttons = new List<ButtonControl>();
+        foreach (var control in device.Controls)
+        {
+            if (control.IsVirtual || ProtectedControls.Contains(control.Cid))
+                continue;
+            // A control can do the job of any control whose group is in its group mask.
+            var targets = control.GroupMask == 0 ? [] : device.Controls
+                .Where(t => t.Cid != control.Cid && t.Group is >= 1 and <= 8 && (control.GroupMask & (1 << (t.Group - 1))) != 0)
+                .Select(t => new ButtonTarget(t.Cid, ControlNames.NameOf(t.Cid)))
+                .ToList();
+            if (targets.Count == 0 && !control.IsDivertable)
+                continue;
+            targets.Insert(0, new ButtonTarget(control.Cid, ControlNames.NameOf(control.Cid)));
+
+            var (mappedTo, diverted) = d.GetControlReporting(control.Cid);
+            buttons.Add(new ButtonControl(control.Cid, ControlNames.NameOf(control.Cid), targets, mappedTo, control.IsDivertable,
+                diverted ? actions.GetValueOrDefault(control.Cid) : null));
+        }
+        Update(device, device.State with { Buttons = buttons.Count > 0 ? buttons : null });
+    }
+
+    // ---- Remembered settings ----
+
+    private DeviceSettings Remembered(DeviceContext device) =>
+        Host.SettingsStore?.Load(device.State.Name) ?? new DeviceSettings();
+
+    private void Remember(DeviceContext device, Action<DeviceSettings> change)
+    {
+        var settings = Remembered(device);
+        change(settings);
+        Host.SettingsStore?.Save(device.State.Name, settings);
+    }
+
+    /// <summary>Sets again what the app set on a device that forgets settings when it reconnects.</summary>
+    private void RestoreSettings(DeviceContext device)
+    {
+        var s = Remembered(device);
+        var d = device.Device;
+        void Restore(string what, Action action)
+        {
+            try { action(); }
+            catch (HidppErrorException e) { DiagnosticLog.Add($"{device.State.Name}: couldn't restore {what}: {e.Message}"); }
+        }
+
+        if (s.Dpi is { } dpi && d.HasAdjustableDpi && device.OnboardFeatureIndex == null)
+            Restore("DPI", () => d.SetDpi(dpi));
+        if (s.WheelMode is { } mode && device.SmartShiftFeatureIndex != null)
+            Restore("SmartShift", () => d.SetWheelMode(mode, s.SmartShiftThreshold, s.Torque));
+        if (s.WheelInverted is { } wheel && d.HasFeature(FeatureId.HiResWheel))
+            Restore("scroll direction", () => d.SetWheelInverted(wheel));
+        if (s.ThumbWheelInverted is { } thumb && d.HasFeature(FeatureId.ThumbWheel))
+            Restore("thumb wheel direction", () => d.SetThumbWheelInverted(thumb));
+        if (device.ReprogFeatureIndex != null)
+        {
+            foreach (var cid in s.Remaps.Keys.Union(s.Actions.Keys))
+                Restore($"button {ControlNames.NameOf(cid)}", () => d.SetControlReporting(cid, s.Remaps.GetValueOrDefault(cid, cid), s.Actions.ContainsKey(cid)));
+        }
+        if (s.Dpi != null || s.WheelMode != null || s.Remaps.Count > 0 || s.Actions.Count > 0)
+            DiagnosticLog.Add($"{device.State.Name}: restored its settings");
     }
 
     private void RefreshBattery(DeviceContext device)
@@ -240,6 +417,23 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
         device.SuppressNextDpiEvent = false;
     }
 
+    /// <summary>A diverted button event lists the controls held down now (up to 4); compare it with the last one.</summary>
+    private void OnButtonsHeld(DeviceContext device, HashSet<int> held)
+    {
+        var actions = Remembered(device).Actions;
+        foreach (var cid in held.Except(device.PressedControls))
+        {
+            if (actions.TryGetValue(cid, out var action))
+                Host.RaiseButtonAction(device.State, action, true);
+        }
+        foreach (var cid in device.PressedControls.Except(held))
+        {
+            if (actions.TryGetValue(cid, out var action))
+                Host.RaiseButtonAction(device.State, action, false);
+        }
+        device.PressedControls = held;
+    }
+
     /// <summary>Runs on a HID reader thread: only decide what to re-read, never talk to the device here.</summary>
     private void OnReport(ChannelContext channel, byte[] report)
     {
@@ -259,12 +453,14 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
                 }
                 else if (device != null)
                 {
+                    device.NeedsRestore = true;
+                    DiagnosticLog.Add($"{device.State.Name} connected");
                     // The receiver says it's connected, so show it awake now and read it once it has settled.
                     Update(device, device.State with { Awake = true });
                     After(SettleDelay, () =>
                     {
                         if (_devices.Contains(device) && device.State.Awake)
-                            Try(device, () => RefreshAll(device));
+                            Try(device, () => Wake(device)); // also replaces a device that was offline since the app started
                     });
                 }
                 else
@@ -280,12 +476,25 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
 
         var index = report[1];
         var feature = report[2];
+        var function = report[3] >> 4;
         Host.Enqueue(() =>
         {
             // The device list belongs to the monitor thread, so look the device up there.
             var target = _devices.FirstOrDefault(d => d.Channel == channel && d.Device.DeviceIndex == index);
             if (target == null) return;
-            if (feature == target.DpiFeatureIndex || feature == target.OnboardFeatureIndex)
+            if (feature == target.ReprogFeatureIndex && function == 0)
+            {
+                var held = new HashSet<int>();
+                for (var i = 4; i + 1 < report.Length && i < 12; i += 2)
+                {
+                    var cid = (report[i] << 8) | report[i + 1];
+                    if (cid != 0) held.Add(cid);
+                }
+                OnButtonsHeld(target, held);
+            }
+            else if (feature == target.SmartShiftFeatureIndex)
+                Try(target, () => RefreshScroll(target)); // the SmartShift button was pressed
+            else if (feature == target.DpiFeatureIndex || feature == target.OnboardFeatureIndex)
                 Try(target, () => RefreshDpi(target, raiseEvent: true));
             else if (feature == target.BatteryFeatureIndex)
                 Try(target, () => RefreshBattery(target));
@@ -294,8 +503,65 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
 
     public override void Dispose()
     {
+        // Give diverted buttons back to the mouse, or they would do nothing while the app isn't running.
+        foreach (var device in _devices.Where(d => d.State.Awake && d.ReprogFeatureIndex != null))
+        {
+            foreach (var cid in device.State.Buttons?.Where(b => b.Action != null).Select(b => b.Cid) ?? [])
+            {
+                try { device.Device.SetControlReporting(cid, device.State.Buttons!.First(b => b.Cid == cid).MappedTo, false); }
+                catch (Exception) { }
+            }
+        }
         foreach (var channel in _channels)
             channel.Channel.Dispose();
+    }
+
+    public override void Describe(StringBuilder report)
+    {
+        foreach (var channel in _channels)
+        {
+            var c = channel.Channel;
+            report.AppendLine();
+            report.AppendLine($"== {c.ProductName} (PID {c.ProductId:X4}{(c.IsBluetooth ? ", Bluetooth" : "")}) ==");
+            report.AppendLine(c.DevicePath);
+            foreach (var device in _devices.Where(d => d.Channel == channel))
+                DescribeDevice(device, report);
+        }
+    }
+
+    private static void DescribeDevice(DeviceContext device, StringBuilder report)
+    {
+        var d = device.Device;
+        report.AppendLine();
+        report.AppendLine($"-- {device.State.Name}: index 0x{d.DeviceIndex:X2}, {d.Connection}, HID++ {d.ProtocolVersion}, {(device.State.Awake ? "awake" : "asleep")} --");
+        void Section(string title, Action write)
+        {
+            try { write(); }
+            catch (Exception e) { report.AppendLine($"{title}: {e.GetType().Name}: {e.Message}"); }
+        }
+
+        Section("Features", () =>
+        {
+            foreach (var f in d.GetFeatures())
+                report.AppendLine($"  [{f.Index:X2}] 0x{f.Id:X4} v{f.Version} {f.Name}{(f.IsHidden ? " (hidden)" : "")}{(f.IsEngineering ? " (engineering)" : "")}");
+        });
+        Section("Battery", () => report.AppendLine($"Battery: {d.GetBattery()}"));
+        if (d.HasAdjustableDpi)
+            Section("DPI", () => report.AppendLine($"DPI: {d.GetDpi()}"));
+        Section("Scroll", () => report.AppendLine($"Scroll: {d.GetScrollSettings()?.ToString() ?? "none"}"));
+        if (d.HasFeature(FeatureId.ReprogControls))
+        {
+            Section("Controls", () =>
+            {
+                report.AppendLine("Controls (cid, task, flags, group, group mask, mapped to, diverted):");
+                foreach (var control in d.GetControls())
+                {
+                    var (mapped, diverted) = d.GetControlReporting(control.Cid);
+                    report.AppendLine($"  0x{control.Cid:X4} {ControlNames.NameOf(control.Cid),-24} task 0x{control.TaskId:X4} flags 0x{control.Flags:X2} " +
+                        $"group {control.Group} mask 0x{control.GroupMask:X2} -> 0x{mapped:X4}{(diverted ? " diverted" : "")}");
+                }
+            });
+        }
     }
 
     private sealed class ChannelContext(HidppChannel channel)
@@ -311,6 +577,13 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
         public byte? DpiFeatureIndex { get; set; }
         public byte? BatteryFeatureIndex { get; set; }
         public byte? OnboardFeatureIndex { get; set; }
+        public byte? ReprogFeatureIndex { get; set; }
+        public byte? SmartShiftFeatureIndex { get; set; }
+        public List<LogitechDevice.ControlInfo>? Controls { get; set; }
+        public HashSet<int> PressedControls { get; set; } = new();
+
+        /// <summary>The device (re)connected, so the settings it forgot need setting again.</summary>
+        public bool NeedsRestore { get; set; } = true;
         public bool SuppressNextDpiEvent { get; set; }
         public bool WakeProbeScheduled { get; set; }
 
@@ -327,8 +600,56 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
             else
             {
                 Device.SetDpi(dpi);
+                provider.Remember(this, s => s.Dpi = dpi);
             }
             provider.RefreshDpi(this, raiseEvent: false);
+        }
+
+        public override void SetWheelMode(WheelMode mode, int? threshold, int? torque)
+        {
+            if (SmartShiftFeatureIndex == null)
+                base.SetWheelMode(mode, threshold, torque);
+            Device.SetWheelMode(mode, threshold, torque);
+            provider.Remember(this, s =>
+            {
+                s.WheelMode = mode;
+                s.SmartShiftThreshold = threshold ?? s.SmartShiftThreshold;
+                s.Torque = torque ?? s.Torque;
+            });
+            provider.RefreshScroll(this);
+        }
+
+        public override void SetWheelInverted(bool inverted)
+        {
+            if (!Device.HasFeature(FeatureId.HiResWheel))
+                base.SetWheelInverted(inverted);
+            Device.SetWheelInverted(inverted);
+            provider.Remember(this, s => s.WheelInverted = inverted);
+            provider.RefreshScroll(this);
+        }
+
+        public override void SetThumbWheelInverted(bool inverted)
+        {
+            if (!Device.HasFeature(FeatureId.ThumbWheel))
+                base.SetThumbWheelInverted(inverted);
+            Device.SetThumbWheelInverted(inverted);
+            provider.Remember(this, s => s.ThumbWheelInverted = inverted);
+            provider.RefreshScroll(this);
+        }
+
+        public override void SetButton(int cid, ButtonAssignment assignment)
+        {
+            if (ReprogFeatureIndex == null)
+                base.SetButton(cid, assignment);
+            var remapTo = assignment.Action == null ? assignment.RemapTo ?? cid : cid;
+            Device.SetControlReporting(cid, remapTo, diverted: assignment.Action != null);
+            provider.Remember(this, s =>
+            {
+                if (remapTo != cid) s.Remaps[cid] = remapTo; else s.Remaps.Remove(cid);
+                if (assignment.Action != null) s.Actions[cid] = assignment.Action; else s.Actions.Remove(cid);
+            });
+            PressedControls.Remove(cid);
+            provider.RefreshButtons(this);
         }
 
         public override void SelectDpiSlot(int slot)

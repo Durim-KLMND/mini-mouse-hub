@@ -2,6 +2,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using MiniMouseHub.Core;
 
 namespace MiniMouseHub.App;
 
@@ -24,6 +25,12 @@ public class AppSettings
 
     /// <summary>Draw the battery level as the tray icon; when off, the tray shows the app icon.</summary>
     public bool TrayShowsBattery { get; set; } = true;
+
+    /// <summary>
+    /// Settings for devices that forget them when they reconnect (such as the MX Master), by model
+    /// name, so the app can set them again.
+    /// </summary>
+    public Dictionary<string, DeviceSettings> Devices { get; set; } = new();
 
     /// <summary>GitHub sign-in for syncing settings. Stays on this PC and is never uploaded.</summary>
     public GitHubAccount? GitHub { get; set; }
@@ -119,4 +126,30 @@ public class GitHubAccount
 
     public string Token => Encoding.UTF8.GetString(
         ProtectedData.Unprotect(Convert.FromBase64String(ProtectedToken), null, DataProtectionScope.CurrentUser));
+}
+
+/// <summary>
+/// Keeps device settings in <see cref="AppSettings"/>. The device monitor calls this from its own
+/// thread, so changes are handed to the UI thread, which owns the settings, and reads get a copy.
+/// </summary>
+internal sealed class DeviceSettingsStore(AppSettings settings, System.Windows.Threading.Dispatcher dispatcher) : IDeviceSettingsStore
+{
+    private readonly object _lock = new();
+
+    public DeviceSettings? Load(string deviceKey)
+    {
+        lock (_lock)
+            return settings.Devices.TryGetValue(deviceKey, out var stored) ? Copy(stored) : null;
+    }
+
+    public void Save(string deviceKey, DeviceSettings deviceSettings)
+    {
+        var copy = Copy(deviceSettings);
+        lock (_lock)
+            settings.Devices = new Dictionary<string, DeviceSettings>(settings.Devices) { [deviceKey] = copy };
+        dispatcher.BeginInvoke(settings.Save);
+    }
+
+    private static DeviceSettings Copy(DeviceSettings s) =>
+        JsonSerializer.Deserialize<DeviceSettings>(JsonSerializer.Serialize(s))!;
 }

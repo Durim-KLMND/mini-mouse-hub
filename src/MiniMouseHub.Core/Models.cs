@@ -133,3 +133,111 @@ public record LightingSettings(int Effect, int Brightness, int Speed, int Hue, i
 /// <param name="EffectNames">The effects the keyboard offers; effect number n is EffectNames[n - 1].</param>
 /// <param name="HasColor">False for single-color backlights, which only have brightness, effect and speed.</param>
 public record LightingState(LightingSettings Settings, IReadOnlyList<string> EffectNames, bool HasColor = true);
+
+/// <summary>How a device reaches the computer.</summary>
+public enum ConnectionKind
+{
+    Unknown,
+    /// <summary>Through a Lightspeed, Unifying or Bolt receiver.</summary>
+    Receiver,
+    Cable,
+    Bluetooth,
+}
+
+/// <summary>How the scroll wheel of a mouse with SmartShift (such as the MX Master) behaves.</summary>
+public enum WheelMode
+{
+    /// <summary>Clicks while scrolling slowly and spins freely when flicked.</summary>
+    SmartShift,
+    AlwaysRatchet,
+    AlwaysFreeSpin,
+}
+
+/// <summary>Scroll wheel settings. A null value means the mouse doesn't have that setting.</summary>
+/// <param name="SmartShiftThreshold">How hard a flick switches to free spin, from 1 (easily) to 50 (hardly ever).</param>
+/// <param name="Torque">How strongly the wheel clicks, from 1 to 100, on mice that can change it.</param>
+public record ScrollSettings(
+    WheelMode? Mode,
+    int? SmartShiftThreshold,
+    int? Torque,
+    bool? WheelInverted,
+    bool? ThumbWheelInverted)
+{
+    public bool HasSmartShift => Mode != null;
+}
+
+/// <summary>A button or key that can be given another job.</summary>
+/// <param name="Cid">Logitech's control ID for it.</param>
+/// <param name="Targets">The other controls whose job it can take on in the mouse itself, including its own.</param>
+/// <param name="MappedTo">The control whose job it does now; its own <see cref="Cid"/> when unchanged.</param>
+/// <param name="CanDivert">The mouse can send its presses to the app instead, so the app can run any action.</param>
+/// <param name="Action">The app action it runs, when it is sent to the app.</param>
+public record ButtonControl(int Cid, string Name, IReadOnlyList<ButtonTarget> Targets, int MappedTo, bool CanDivert, string? Action);
+
+public record ButtonTarget(int Cid, string Name);
+
+/// <summary>Names of Logitech control IDs (HID++ feature 0x1B04).</summary>
+public static class ControlNames
+{
+    private static readonly Dictionary<int, string> Names = new()
+    {
+        [0x0050] = "Left click",
+        [0x0051] = "Right click",
+        [0x0052] = "Middle click",
+        [0x0053] = "Back",
+        [0x0054] = "Back",
+        [0x0056] = "Forward",
+        [0x0057] = "Forward",
+        [0x0059] = "Button 6",
+        [0x005A] = "Scroll left",
+        [0x005B] = "Tilt left",
+        [0x005C] = "Scroll right",
+        [0x005D] = "Tilt right",
+        [0x005E] = "Button 9",
+        [0x005F] = "Button 10",
+        [0x00C3] = "Gesture button",
+        [0x00C4] = "SmartShift button",
+        [0x00CE] = "Back",
+        [0x00CF] = "Forward",
+        [0x00D0] = "Gesture button",
+        [0x00D7] = "Virtual gesture button",
+        [0x00FD] = "DPI switch",
+        [0x01A0] = "Haptic sense panel",
+    };
+
+    public static string NameOf(int cid) => Names.TryGetValue(cid, out var name) ? name : $"Control 0x{cid:X4}";
+}
+
+/// <summary>
+/// Settings the app sets on a device that forgets them when it is switched off or reconnects (mice
+/// without onboard profiles, such as the MX Master). The app keeps them and sets them again each
+/// time the device connects. Null means "leave it as the device has it".
+/// </summary>
+public sealed class DeviceSettings
+{
+    public int? Dpi { get; set; }
+    public WheelMode? WheelMode { get; set; }
+    public int? SmartShiftThreshold { get; set; }
+    public int? Torque { get; set; }
+    public bool? WheelInverted { get; set; }
+    public bool? ThumbWheelInverted { get; set; }
+
+    /// <summary>Buttons given another button's job in the mouse: control ID to control ID.</summary>
+    public Dictionary<int, int> Remaps { get; set; } = new();
+
+    /// <summary>Buttons whose presses go to the app: control ID to app action.</summary>
+    public Dictionary<int, string> Actions { get; set; } = new();
+}
+
+/// <summary>Keeps <see cref="DeviceSettings"/> between runs. Called on the device monitor thread.</summary>
+public interface IDeviceSettingsStore
+{
+    DeviceSettings? Load(string deviceKey);
+    void Save(string deviceKey, DeviceSettings settings);
+}
+
+/// <summary>What a button should do: its own job, another control's job, or an app action.</summary>
+public record ButtonAssignment(int? RemapTo, string? Action)
+{
+    public static ButtonAssignment Default { get; } = new(null, null);
+}

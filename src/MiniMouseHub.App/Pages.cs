@@ -81,9 +81,12 @@ internal static class Ui
     /// <summary>For example "Mouse · Wireless" or "Keyboard · connected by cable".</summary>
     public static string Describe(DeviceState device, bool longForm = false)
     {
-        var connection = longForm
-            ? (device.IsWired ? "connected by cable" : "wireless")
-            : (device.IsWired ? "Cable" : "Wireless");
+        var connection = (device.Connection, device.IsWired) switch
+        {
+            (ConnectionKind.Bluetooth, _) => longForm ? "connected by Bluetooth" : "Bluetooth",
+            (_, true) => longForm ? "connected by cable" : "Cable",
+            _ => longForm ? "wireless" : "Wireless",
+        };
         return $"{KindName(device.Kind)} · {connection}";
     }
 }
@@ -100,7 +103,8 @@ internal static class HomePage
         if (devices.Count == 0)
         {
             panel.Children.Add(Ui.Text(firstScanDone
-                ? "No devices found. Plug in a Lightspeed receiver, a cable or a VIA keyboard, move the mouse to wake it, and make sure G HUB is closed."
+                ? "No devices found. Plug in a Lightspeed, Bolt or Unifying receiver, a cable or a VIA keyboard, or pair a Logitech mouse by Bluetooth. " +
+                  "Move the mouse to wake it, and make sure G HUB and Logi Options+ are closed."
                 : "Looking for devices…", 14, "Muted"));
             return panel;
         }
@@ -126,7 +130,7 @@ internal static class HomePage
         var info = new StackPanel();
         Grid.SetRow(info, 1);
         info.Children.Add(Ui.Text(device.DisplayName, 15, weight: FontWeights.SemiBold));
-        var status = device.Awake ? Ui.Describe(device) : "Asleep. Move it to wake it";
+        var status = device.Awake ? Ui.Describe(device) : "Offline. Switch it on or move it";
         info.Children.Add(Ui.Text(status, 12, "Muted"));
 
         if (device.Battery != null)
@@ -174,6 +178,8 @@ internal sealed class DevicePage
     private readonly TextBlock _note = Ui.Text("", 13);
     private readonly Border _noteCard;
     private readonly LightingCard _lighting;
+    private readonly ScrollCard _scroll;
+    private readonly ButtonsCard _buttons;
     private readonly Border _testerCard;
 
     public UIElement Root { get; }
@@ -238,6 +244,10 @@ internal sealed class DevicePage
         dpi.Children.Add(_dpiHint);
         _dpiCard = Ui.Card(dpi);
         right.Children.Add(_dpiCard);
+        _scroll = new ScrollCard(monitor, device);
+        right.Children.Add(_scroll.Root);
+        _buttons = new ButtonsCard(monitor, device);
+        right.Children.Add(_buttons.Root);
         _lighting = new LightingCard(monitor, device);
         right.Children.Add(_lighting.Root);
 
@@ -274,11 +284,13 @@ internal sealed class DevicePage
 
         _status.Text = device.Awake
             ? Ui.Describe(device, longForm: true)
-            : "Asleep or switched off. Move it to wake it.";
+            : "Offline: switched off or asleep. Switch it on or move it to wake it.";
 
         _noteCard.Visibility = device.Note != null ? Visibility.Visible : Visibility.Collapsed;
         _note.Text = device.Note ?? "";
         _lighting.Update(device);
+        _scroll.Update(device);
+        _buttons.Update(device);
         _testerCard.Visibility = device.Kind == DeviceKind.Keyboard ? Visibility.Visible : Visibility.Collapsed;
 
         // A wired device without a battery reading has no battery; a wireless one may just be asleep.
@@ -513,10 +525,246 @@ internal sealed class LightingCard
     }
 }
 
+/// <summary>
+/// Scroll wheel settings for mice such as the MX Master: SmartShift (when the wheel switches from
+/// clicking to spinning freely), click strength, and scroll direction.
+/// </summary>
+internal sealed class ScrollCard
+{
+    private static readonly TimeSpan SendDelay = TimeSpan.FromMilliseconds(350);
+    private static int _instances;
+
+    private readonly DeviceMonitor _monitor;
+    private DeviceState _device;
+    private readonly RadioButton _smartShift;
+    private readonly RadioButton _ratchet;
+    private readonly RadioButton _freeSpin;
+    private readonly StackPanel _modePanel = new();
+    private readonly Slider _threshold = new() { Minimum = 1, Maximum = 50, SmallChange = 1, LargeChange = 5, IsMoveToPointEnabled = true };
+    private readonly StackPanel _thresholdRow;
+    private readonly Slider _torque = new() { Minimum = 1, Maximum = 100, SmallChange = 1, LargeChange = 10, IsMoveToPointEnabled = true };
+    private readonly StackPanel _torqueRow;
+    private readonly CheckBox _wheelInverted = new() { Content = "Reverse the scroll direction", Margin = new Thickness(0, 12, 0, 0) };
+    private readonly CheckBox _thumbInverted = new() { Content = "Reverse the thumb wheel direction" };
+    private readonly TextBlock _hint = Ui.Text("", 12, "Muted");
+    private readonly System.Windows.Threading.DispatcherTimer _sendTimer = new() { Interval = SendDelay };
+    private bool _updating;
+    private bool _pending;
+
+    public Border Root { get; }
+
+    public ScrollCard(DeviceMonitor monitor, DeviceState device)
+    {
+        _monitor = monitor;
+        _device = device;
+        var group = $"WheelMode{++_instances}";
+        _smartShift = new RadioButton { GroupName = group, Content = "SmartShift: clicks when you scroll slowly, spins freely when you flick it" };
+        _ratchet = new RadioButton { GroupName = group, Content = "Always click" };
+        _freeSpin = new RadioButton { GroupName = group, Content = "Always spin freely" };
+
+        var panel = new StackPanel();
+        panel.Children.Add(Ui.Label("SCROLL WHEEL"));
+        _modePanel.Children.Add(_smartShift);
+        _modePanel.Children.Add(_ratchet);
+        _modePanel.Children.Add(_freeSpin);
+        panel.Children.Add(_modePanel);
+        _thresholdRow = Row("How fast a flick switches to free spin (left: gentle, right: hard)", _threshold);
+        panel.Children.Add(_thresholdRow);
+        _torqueRow = Row("Click strength", _torque);
+        panel.Children.Add(_torqueRow);
+        panel.Children.Add(_wheelInverted);
+        panel.Children.Add(_thumbInverted);
+        _hint.Margin = new Thickness(0, 10, 0, 0);
+        panel.Children.Add(_hint);
+        Root = Ui.Card(panel);
+
+        foreach (var option in new[] { _smartShift, _ratchet, _freeSpin })
+            option.Checked += (_, _) => WheelChanged(immediately: true);
+        _threshold.ValueChanged += (_, _) => WheelChanged(immediately: false);
+        _torque.ValueChanged += (_, _) => WheelChanged(immediately: false);
+        _sendTimer.Tick += async (_, _) => await SendWheel();
+        _wheelInverted.Click += async (_, _) => await Run(() => _monitor.SetWheelInvertedAsync(_device.Id, _wheelInverted.IsChecked == true), "scroll direction");
+        _thumbInverted.Click += async (_, _) => await Run(() => _monitor.SetThumbWheelInvertedAsync(_device.Id, _thumbInverted.IsChecked == true), "thumb wheel direction");
+
+        Update(device);
+    }
+
+    private static StackPanel Row(string label, FrameworkElement control)
+    {
+        var row = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
+        row.Children.Add(Ui.Text(label, 12, "Muted"));
+        row.Children.Add(control);
+        return row;
+    }
+
+    public void Update(DeviceState device)
+    {
+        _device = device;
+        Root.Visibility = device.Scroll != null ? Visibility.Visible : Visibility.Collapsed;
+        if (device.Scroll is not { } scroll || _pending)
+            return;
+
+        _updating = true;
+        _modePanel.Visibility = scroll.HasSmartShift ? Visibility.Visible : Visibility.Collapsed;
+        _smartShift.IsChecked = scroll.Mode == WheelMode.SmartShift;
+        _ratchet.IsChecked = scroll.Mode == WheelMode.AlwaysRatchet;
+        _freeSpin.IsChecked = scroll.Mode == WheelMode.AlwaysFreeSpin;
+        if (scroll.SmartShiftThreshold is { } threshold)
+            _threshold.Value = threshold;
+        _torqueRow.Visibility = scroll.Torque != null ? Visibility.Visible : Visibility.Collapsed;
+        if (scroll.Torque is { } torque)
+            _torque.Value = torque;
+        _wheelInverted.Visibility = scroll.WheelInverted != null ? Visibility.Visible : Visibility.Collapsed;
+        _wheelInverted.IsChecked = scroll.WheelInverted == true;
+        _thumbInverted.Visibility = scroll.ThumbWheelInverted != null ? Visibility.Visible : Visibility.Collapsed;
+        _thumbInverted.IsChecked = scroll.ThumbWheelInverted == true;
+        _updating = false;
+        RefreshControls();
+    }
+
+    private void RefreshControls()
+    {
+        _thresholdRow.Visibility = _device.Scroll?.HasSmartShift == true && _smartShift.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        Root.IsEnabled = _device.Awake;
+    }
+
+    private void WheelChanged(bool immediately)
+    {
+        RefreshControls();
+        if (_updating) return;
+        _pending = true;
+        _sendTimer.Stop();
+        if (immediately)
+            _ = SendWheel();
+        else
+            _sendTimer.Start();
+    }
+
+    private async Task SendWheel()
+    {
+        _sendTimer.Stop();
+        var mode = _freeSpin.IsChecked == true ? WheelMode.AlwaysFreeSpin
+            : _ratchet.IsChecked == true ? WheelMode.AlwaysRatchet
+            : WheelMode.SmartShift;
+        int? torque = _device.Scroll?.Torque != null ? (int)Math.Round(_torque.Value) : null;
+        try
+        {
+            await Run(() => _monitor.SetWheelModeAsync(_device.Id, mode, (int)Math.Round(_threshold.Value), torque), "scroll wheel");
+        }
+        finally
+        {
+            if (!_sendTimer.IsEnabled)
+                _pending = false;
+        }
+    }
+
+    private async Task Run(Func<Task> change, string what)
+    {
+        try
+        {
+            await change();
+            _hint.Text = "Saved. The app sets it again whenever the mouse reconnects.";
+        }
+        catch (Exception ex)
+        {
+            _hint.Text = $"Couldn't change the {what}: {ex.Message}";
+        }
+    }
+}
+
+/// <summary>
+/// Button assignments for mice without onboard profiles (such as the MX Master). A button can take on
+/// another button's job inside the mouse, or send its presses to the app, which runs an action.
+/// </summary>
+internal sealed class ButtonsCard
+{
+    private record Option(string Label, ButtonAssignment Assignment)
+    {
+        public override string ToString() => Label;
+    }
+
+    private readonly DeviceMonitor _monitor;
+    private DeviceState _device;
+    private readonly StackPanel _rows = new();
+    private readonly TextBlock _hint = Ui.Text("", 12, "Muted");
+    private string? _shown;
+
+    public Border Root { get; }
+
+    public ButtonsCard(DeviceMonitor monitor, DeviceState device)
+    {
+        _monitor = monitor;
+        _device = device;
+        var panel = new StackPanel();
+        panel.Children.Add(Ui.Label("BUTTONS"));
+        panel.Children.Add(_rows);
+        _hint.Margin = new Thickness(0, 10, 0, 0);
+        _hint.Text = "Actions that start with \"App:\" only work while Mini mouse hub is running. The app sets the buttons again whenever the mouse reconnects.";
+        panel.Children.Add(_hint);
+        Root = Ui.Card(panel);
+        Update(device);
+    }
+
+    public void Update(DeviceState device)
+    {
+        _device = device;
+        Root.Visibility = device.Buttons is { Count: > 0 } ? Visibility.Visible : Visibility.Collapsed;
+        Root.IsEnabled = device.Awake;
+        if (device.Buttons is not { } buttons)
+            return;
+
+        // Rebuild only when something changed, so an open dropdown isn't closed by a battery update.
+        var shown = string.Join(";", buttons.Select(b => $"{b.Cid}:{b.MappedTo}:{b.Action}"));
+        if (shown == _shown) return;
+        _shown = shown;
+
+        _rows.Children.Clear();
+        foreach (var button in buttons)
+            _rows.Children.Add(Row(button));
+    }
+
+    private Grid Row(ButtonControl button)
+    {
+        var options = button.Targets
+            .Select(t => new Option(t.Cid == button.Cid ? $"{t.Name} (default)" : t.Name, t.Cid == button.Cid ? ButtonAssignment.Default : new ButtonAssignment(t.Cid, null)))
+            .ToList();
+        if (button.CanDivert)
+            options.AddRange(ButtonActions.All.Select(a => new Option($"App: {a.Name}", new ButtonAssignment(null, a.Id))));
+
+        var current = button.Action != null
+            ? options.FindIndex(o => o.Assignment.Action == button.Action)
+            : options.FindIndex(o => (o.Assignment.RemapTo ?? button.Cid) == button.MappedTo && o.Assignment.Action == null);
+
+        var row = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(170) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var name = Ui.Text(button.Name, 13);
+        name.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(name);
+        var choice = new ComboBox { ItemsSource = options, SelectedIndex = Math.Max(current, 0) };
+        choice.SelectionChanged += async (_, _) =>
+        {
+            if (choice.SelectedItem is not Option option) return;
+            try
+            {
+                await _monitor.SetButtonAsync(_device.Id, button.Cid, option.Assignment);
+                _hint.Text = $"{button.Name} now does: {option.Label}.";
+            }
+            catch (Exception ex)
+            {
+                _hint.Text = $"Couldn't change {button.Name}: {ex.Message}";
+            }
+        };
+        Grid.SetColumn(choice, 1);
+        row.Children.Add(choice);
+        return row;
+    }
+}
+
 /// <summary>App settings.</summary>
 internal static class SettingsPage
 {
-    public static UIElement Build(AppSettings settings, Func<Task<string>> checkForUpdates, SettingsSync sync)
+    public static UIElement Build(AppSettings settings, Func<Task<string>> checkForUpdates, SettingsSync sync, DeviceMonitor monitor)
     {
         var panel = new StackPanel { MaxWidth = 560, HorizontalAlignment = HorizontalAlignment.Left };
 
@@ -573,7 +821,54 @@ internal static class SettingsPage
         panel.Children.Add(Ui.Card(updates));
 
         panel.Children.Add(new GitHubSyncCard(settings, sync).Root);
+        panel.Children.Add(TroubleshootingCard(monitor));
         return panel;
+    }
+
+    /// <summary>Saves a diagnostic report someone testing a new device can send back.</summary>
+    private static Border TroubleshootingCard(DeviceMonitor monitor)
+    {
+        var card = new StackPanel();
+        card.Children.Add(Ui.Label("TROUBLESHOOTING"));
+        card.Children.Add(Ui.Text("If a device doesn't show up or a setting doesn't work, save a diagnostic report and send it to the developer. " +
+            "It lists your Logitech devices, what they support and the app's recent messages with them. It contains no personal files.", 12, "Muted"));
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
+        var save = new Button { Content = "Save diagnostic report" };
+        var result = Ui.Text("", 12, "Muted");
+        result.VerticalAlignment = VerticalAlignment.Center;
+        result.Margin = new Thickness(12, 0, 0, 0);
+        save.Click += async (_, _) =>
+        {
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                FileName = $"Mini mouse hub report {DateTime.Now:yyyy-MM-dd HHmm}.txt",
+                DefaultExt = ".txt",
+                Filter = "Text file|*.txt",
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+            };
+            if (dialog.ShowDialog() != true) return;
+            save.IsEnabled = false;
+            result.Text = "Asking the devices…";
+            try
+            {
+                var report = await monitor.CreateDiagnosticReportAsync($"Mini mouse hub {Updater.CurrentVersion} diagnostic report");
+                await System.IO.File.WriteAllTextAsync(dialog.FileName, report);
+                result.Text = "Saved. Send that file to the developer.";
+                System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{dialog.FileName}\"");
+            }
+            catch (Exception ex)
+            {
+                result.Text = $"Couldn't save the report: {ex.Message}";
+            }
+            finally
+            {
+                save.IsEnabled = true;
+            }
+        };
+        row.Children.Add(save);
+        row.Children.Add(result);
+        card.Children.Add(row);
+        return Ui.Card(card);
     }
 
     private static CheckBox Toggle(string text, bool value, Action<bool> changed)

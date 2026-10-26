@@ -11,7 +11,11 @@ public sealed class LogitechDevice
     public HidppChannel Channel { get; }
     public byte DeviceIndex { get; }
     public Version ProtocolVersion { get; }
-    public bool IsWired => DeviceIndex == HidppConstants.WiredDeviceIndex;
+    public bool IsWired => DeviceIndex == HidppConstants.WiredDeviceIndex && !Channel.IsBluetooth;
+
+    public ConnectionKind Connection => Channel.IsBluetooth ? ConnectionKind.Bluetooth
+        : IsWired ? ConnectionKind.Cable
+        : ConnectionKind.Receiver;
 
     private LogitechDevice(HidppChannel channel, byte deviceIndex, Version protocolVersion)
     {
@@ -24,28 +28,37 @@ public sealed class LogitechDevice
     /// Finds HID++ 2.0 devices on a channel: the device itself when it's wired, or the devices paired
     /// with it when it's a receiver. Devices that are switched off or asleep don't answer and are skipped.
     /// </summary>
-    public static List<LogitechDevice> Enumerate(HidppChannel channel)
+    public static List<LogitechDevice> Enumerate(HidppChannel channel, IEnumerable<byte>? indexes = null)
     {
         var found = new List<LogitechDevice>();
 
-        // A wired HID++ 2.0 device answers at 0xFF. A receiver answers there too, but with a HID++ 1.0 error.
-        var direct = TryPing(channel, HidppConstants.WiredDeviceIndex);
+        // A wired or Bluetooth HID++ 2.0 device answers at 0xFF. A receiver answers there too, but with a HID++ 1.0 error.
+        var direct = TryConnect(channel, HidppConstants.WiredDeviceIndex);
         if (direct != null)
         {
             found.Add(direct);
             return found;
         }
 
-        for (byte index = 1; index <= 6; index++)
+        foreach (var index in indexes ?? [1, 2, 3, 4, 5, 6])
         {
-            var device = TryPing(channel, index);
+            var device = TryConnect(channel, index);
             if (device != null)
                 found.Add(device);
         }
         return found;
     }
 
-    private static LogitechDevice? TryPing(HidppChannel channel, byte deviceIndex)
+    /// <summary>
+    /// A device that is known (paired with a receiver, or paired by Bluetooth) but didn't answer, because
+    /// it is switched off or asleep. Replace it with <see cref="TryConnect"/> once it answers.
+    /// </summary>
+    public static LogitechDevice Offline(HidppChannel channel, byte deviceIndex) => new(channel, deviceIndex, new Version(0, 0));
+
+    public bool IsOffline => ProtocolVersion.Major == 0;
+
+    /// <summary>Pings a device; returns it when it answers as a HID++ 2.0 device.</summary>
+    public static LogitechDevice? TryConnect(HidppChannel channel, byte deviceIndex)
     {
         const byte pingData = 0x5A;
         try
@@ -325,5 +338,135 @@ public sealed class LogitechDevice
     {
         // 0x8100 function 1 = setOnboardMode(mode)
         Call(FeatureId.OnboardProfiles, 1, (byte)mode);
+    }
+
+    // ---- Scroll wheel ----
+    // SmartShift (0x2110, or 0x2111 which adds tunable torque) switches the MX Master's wheel between
+    // ratchet and free spin. Mode 1 is free spin, 2 is ratchet; with ratchet, the auto-disengage value
+    // is how fast a flick must be to switch to free spin, and 255 turns that off. A 0 in a write means
+    // "don't change this".
+
+    private const byte FreeSpin = 1;
+    private const byte Ratchet = 2;
+    private const byte NeverDisengage = 0xFF;
+
+    public ScrollSettings? GetScrollSettings()
+    {
+        WheelMode? mode = null;
+        int? threshold = null;
+        int? torque = null;
+        if (HasFeature(FeatureId.SmartShiftEnhanced))
+        {
+            // 0x2111 function 0 = getCapabilities -> [flags (bit 0 = tunable torque), ...];
+            // function 1 = getRatchetControlMode -> [mode, auto-disengage, torque]
+            var tunable = (Call(FeatureId.SmartShiftEnhanced, 0)[0] & 0x01) != 0;
+            var r = Call(FeatureId.SmartShiftEnhanced, 1);
+            (mode, threshold) = ReadWheelMode(r);
+            torque = tunable ? r[2] : null;
+        }
+        else if (HasFeature(FeatureId.SmartShift))
+        {
+            // 0x2110 function 0 = getRatchetControlMode -> [mode, auto-disengage, default auto-disengage]
+            (mode, threshold) = ReadWheelMode(Call(FeatureId.SmartShift, 0));
+        }
+
+        bool? wheelInverted = null;
+        if (HasFeature(FeatureId.HiResWheel))
+            wheelInverted = (Call(FeatureId.HiResWheel, 1)[0] & HiResWheelInvert) != 0; // getWheelMode -> [mode]
+
+        bool? thumbInverted = null;
+        if (HasFeature(FeatureId.ThumbWheel))
+            thumbInverted = (Call(FeatureId.ThumbWheel, 1)[1] & 0x01) != 0; // getThumbwheelReporting -> [reporting, invert]
+
+        if (mode == null && wheelInverted == null && thumbInverted == null)
+            return null;
+        return new ScrollSettings(mode, threshold, torque, wheelInverted, thumbInverted);
+    }
+
+    private static (WheelMode, int?) ReadWheelMode(byte[] r) => r[0] == FreeSpin
+        ? (WheelMode.AlwaysFreeSpin, null)
+        : r[1] == NeverDisengage || r[1] == 0
+            ? (WheelMode.AlwaysRatchet, null)
+            : (WheelMode.SmartShift, Math.Min((int)r[1], 50));
+
+    /// <summary>Sets the wheel mode. <paramref name="threshold"/> (1-50) only matters for SmartShift; <paramref name="torque"/> (1-100) is optional.</summary>
+    public void SetWheelMode(WheelMode mode, int? threshold, int? torque)
+    {
+        var (modeByte, disengage) = mode switch
+        {
+            WheelMode.AlwaysFreeSpin => (FreeSpin, (byte)0),
+            WheelMode.AlwaysRatchet => (Ratchet, NeverDisengage),
+            _ => (Ratchet, (byte)Math.Clamp(threshold ?? 10, 1, 50)),
+        };
+        if (HasFeature(FeatureId.SmartShiftEnhanced))
+            Call(FeatureId.SmartShiftEnhanced, 2, modeByte, disengage, (byte)Math.Clamp(torque ?? 0, 0, 100)); // setRatchetControlMode
+        else
+            Call(FeatureId.SmartShift, 1, modeByte, disengage); // setRatchetControlMode
+    }
+
+    // Hi-res wheel (0x2121) mode bits: 0x01 sends the wheel to software instead of Windows, 0x02 high
+    // resolution, 0x04 inverted. Only the invert bit is changed here.
+    private const byte HiResWheelInvert = 0x04;
+
+    public void SetWheelInverted(bool inverted)
+    {
+        var mode = Call(FeatureId.HiResWheel, 1)[0];
+        mode = inverted ? (byte)(mode | HiResWheelInvert) : (byte)(mode & ~HiResWheelInvert);
+        Call(FeatureId.HiResWheel, 2, mode); // setWheelMode
+    }
+
+    public void SetThumbWheelInverted(bool inverted)
+    {
+        var current = Call(FeatureId.ThumbWheel, 1);
+        Call(FeatureId.ThumbWheel, 2, current[0], (byte)(inverted ? 1 : 0)); // setThumbwheelReporting(reporting, invert)
+    }
+
+    // ---- Buttons ----
+    // Special keys and mouse buttons (0x1B04, version 4). Each control has an ID (CID). A control can
+    // be remapped to do the job of another control in one of the groups in its group mask, or be
+    // "diverted", so its presses come to the app as HID++ events instead. Both last until the device
+    // reconnects, so the app sets them again each time.
+
+    private const byte KeyFlagReprogrammable = 0x10;
+    private const byte KeyFlagDivertable = 0x20;
+    private const byte KeyFlagVirtual = 0x80;
+    private const byte MappingDiverted = 0x01;
+    private const byte MappingDivertedValid = 0x02;
+
+    public record ControlInfo(int Cid, int TaskId, byte Flags, byte Group, byte GroupMask)
+    {
+        public bool IsReprogrammable => (Flags & KeyFlagReprogrammable) != 0;
+        public bool IsDivertable => (Flags & KeyFlagDivertable) != 0;
+        public bool IsVirtual => (Flags & KeyFlagVirtual) != 0;
+    }
+
+    public List<ControlInfo> GetControls()
+    {
+        var count = Call(FeatureId.ReprogControls, 0)[0]; // getCount
+        var controls = new List<ControlInfo>();
+        for (byte i = 0; i < count; i++)
+        {
+            // getCidInfo(index) -> [cid (2), task id (2), flags, position, group, group mask, more flags]
+            var r = Call(FeatureId.ReprogControls, 1, i);
+            controls.Add(new ControlInfo((r[0] << 8) | r[1], (r[2] << 8) | r[3], r[4], r[6], r[7]));
+        }
+        return controls;
+    }
+
+    /// <summary>Returns the control whose job <paramref name="cid"/> does now, and whether it is diverted.</summary>
+    public (int MappedTo, bool Diverted) GetControlReporting(int cid)
+    {
+        // getCidReporting(cid) -> [cid (2), mapping flags, remapped cid (2)]; 0 means not remapped
+        var r = Call(FeatureId.ReprogControls, 2, (byte)(cid >> 8), (byte)cid);
+        var mapped = (r[3] << 8) | r[4];
+        return (mapped == 0 ? cid : mapped, (r[2] & MappingDiverted) != 0);
+    }
+
+    /// <summary>Gives a control another control's job (pass its own ID to undo), and sends its presses to the app or not.</summary>
+    public void SetControlReporting(int cid, int remapTo, bool diverted)
+    {
+        // setCidReporting(cid, flags, remap): each flag has a "valid" bit beside it saying it should change.
+        var flags = (byte)(MappingDivertedValid | (diverted ? MappingDiverted : 0));
+        Call(FeatureId.ReprogControls, 3, (byte)(cid >> 8), (byte)cid, flags, (byte)(remapTo >> 8), (byte)remapTo);
     }
 }
