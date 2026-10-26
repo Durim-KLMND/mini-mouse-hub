@@ -8,6 +8,13 @@ public static class HidppConstants
     /// <summary>Vendor usage page that carries HID++ traffic.</summary>
     public const ushort HidppUsagePage = 0xFF00;
 
+    /// <summary>
+    /// Vendor usage page that carries HID++ traffic for devices connected by Bluetooth (such as the MX
+    /// Master series). These only have the long report, usage 0x0202, and always use device index 0xFF.
+    /// </summary>
+    public const ushort BluetoothHidppUsagePage = 0xFF43;
+    public const ushort BluetoothHidppUsage = 0x0202;
+
     public const byte ShortReportId = 0x10; // 7 bytes total
     public const byte LongReportId = 0x11;  // 20 bytes total
     public const int ShortReportLength = 7;
@@ -25,6 +32,13 @@ public static class HidppConstants
     /// <summary>HID++ 1.0 sub-IDs for reading and writing a receiver's short registers.</summary>
     public const byte SetShortRegister = 0x80;
     public const byte GetShortRegister = 0x81;
+    public const byte GetLongRegister = 0x83;
+
+    /// <summary>Receiver long register with pairing information and names of paired devices, by sub-register.</summary>
+    public const byte ReceiverInfoRegister = 0xB5;
+
+    /// <summary>Bolt receiver product ID. Bolt keeps pairing information in other sub-registers than Unifying and Lightspeed.</summary>
+    public const int BoltReceiverProductId = 0xC548;
 
     /// <summary>Receiver register holding which notifications it sends to the computer.</summary>
     public const byte NotificationFlagsRegister = 0x00;
@@ -45,6 +59,11 @@ public static class FeatureId
     public const ushort BatteryStatus = 0x1000;
     public const ushort BatteryVoltage = 0x1001;
     public const ushort UnifiedBattery = 0x1004;
+    public const ushort ReprogControls = 0x1B04;
+    public const ushort SmartShift = 0x2110;
+    public const ushort SmartShiftEnhanced = 0x2111;
+    public const ushort HiResWheel = 0x2121;
+    public const ushort ThumbWheel = 0x2150;
     public const ushort AdjustableDpi = 0x2201;
     public const ushort ExtendedAdjustableDpi = 0x2202;
     public const ushort ReportRate = 0x8060;
@@ -78,8 +97,16 @@ public static class FeatureId
         [0x1811] = "Production test",
         [0x1890] = "RF test",
         [0x18A1] = "LED test",
+        [0x1814] = "Change host",
+        [0x1815] = "Hosts info",
         [0x1B04] = "Special keys and mouse buttons",
+        [0x1D4B] = "Wireless device status",
         [0x1EB0] = "Tracking data",
+        [0x2110] = "SmartShift",
+        [0x2111] = "SmartShift with tunable torque",
+        [0x2120] = "Hi-res scrolling",
+        [0x2121] = "Hi-res wheel",
+        [0x2150] = "Thumb wheel",
         [0x2201] = "Adjustable DPI",
         [0x2202] = "Extended adjustable DPI",
         [0x2250] = "Analysis mode",
