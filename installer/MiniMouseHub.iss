@@ -2,7 +2,7 @@
 ; It installs to %LOCALAPPDATA%\Programs\Mini mouse hub without admin rights. The app then updates
 ; itself in that folder from GitHub releases, so the installer is only needed once.
 ;
-; Build: ISCC.exe /DAppVersion=0.3.1 /DSourceExe=path\to\MiniMouseHub.exe installer\MiniMouseHub.iss
+; Build: ISCC.exe /DAppVersion=0.4.1 /DSourceExe=path\to\MiniMouseHub.exe installer\MiniMouseHub.iss
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"

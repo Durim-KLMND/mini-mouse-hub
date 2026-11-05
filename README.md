@@ -98,7 +98,7 @@ Run it with `--minimized` to start straight in the tray.
 
 ## Releases and auto-update
 
-Every push to `main` runs `.github/workflows/release.yml`, which tests, builds `MiniMouseHub.exe`, and publishes it as a GitHub release tagged `v0.3.<run number>`, together with `MiniMouseHub-Setup.exe`, the installer built from `installer/MiniMouseHub.iss` with [Inno Setup](https://jrsoftware.org/isinfo.php). The app checks the latest release at startup and every 4 hours, and when it's newer, downloads it, swaps it in next to the running copy, and restarts. Automatic updates can be turned off in Settings.
+Every push to `main` runs `.github/workflows/release.yml`, which tests, builds `MiniMouseHub.exe`, and publishes it as a GitHub release tagged `v0.4.<run number>`, together with `MiniMouseHub-Setup.exe`, the installer built from `installer/MiniMouseHub.iss` with [Inno Setup](https://jrsoftware.org/isinfo.php). The app checks the latest release at startup and every 4 hours, and when it's newer, downloads it, swaps it in next to the running copy, and restarts. Automatic updates can be turned off in Settings.
 
 ## Glorious GMMK Pro
 

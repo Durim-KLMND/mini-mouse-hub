@@ -23,6 +23,7 @@ public partial class MainWindow : Window
 
     private PageKind _page = PageKind.Home;
     private string? _deviceId;
+    private string? _deviceName; // the shown device's vendor and name, to follow it to another connection
     private DevicePage? _devicePage;
     private KeyTesterPage? _keyTester;
 
@@ -101,15 +102,30 @@ public partial class MainWindow : Window
                 break;
             case PageKind.Device:
                 var device = devices.FirstOrDefault(d => d.Id == _deviceId);
-                if (device == null)
-                    ShowHome(); // unplugged
-                else
+                if (device != null)
                     _devicePage?.Update(device);
+                else if (SameDeviceAnotherWay(devices) is { } moved)
+                    ShowDevice(moved); // the cable was plugged in or out: same mouse, other connection
+                else
+                    ShowHome(); // unplugged
                 break;
             case PageKind.KeyTester when devices.All(d => d.Id != _deviceId):
-                ShowHome(); // unplugged
+                if (SameDeviceAnotherWay(devices) is { } same)
+                    _deviceId = same.Id;
+                else
+                    ShowHome(); // unplugged
                 break;
         }
+    }
+
+    /// <summary>
+    /// The device being shown, now reached another way (the app shows a mouse once, by its better
+    /// connection, so plugging its charging cable in or out swaps the entry).
+    /// </summary>
+    private DeviceState? SameDeviceAnotherWay(IReadOnlyList<DeviceState> devices)
+    {
+        var matches = devices.Where(d => d.DisplayName == _deviceName).Take(2).ToList();
+        return matches.Count == 1 ? matches[0] : null;
     }
 
     // ---- Navigation ----
@@ -128,6 +144,7 @@ public partial class MainWindow : Window
     {
         _page = PageKind.Device;
         _deviceId = device.Id;
+        _deviceName = device.DisplayName;
         _keyTester = null;
         BackButton.Visibility = Visibility.Visible;
         TitleText.Text = device.DisplayName;
@@ -139,6 +156,7 @@ public partial class MainWindow : Window
     {
         _page = PageKind.KeyTester;
         _deviceId = device.Id;
+        _deviceName = device.DisplayName;
         _devicePage = null;
         BackButton.Visibility = Visibility.Visible;
         TitleText.Text = $"{device.DisplayName}: key tester";
