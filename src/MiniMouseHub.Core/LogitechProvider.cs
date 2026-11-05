@@ -23,7 +23,26 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
     // How long to wait for each slot when looking for devices.
     private const int ScanTimeoutMs = 250;
 
-    public override IEnumerable<ManagedDevice> Devices => _devices;
+    // A mouse charging over its cable while still paired with its receiver answers on both, so only
+    // the better of the two connections is shown. Both are still read, so the other one takes over
+    // straight away when the cable is unplugged (or the receiver loses the link).
+    public override IEnumerable<ManagedDevice> Devices => _devices.Where(d => Shown(d) == d);
+
+    /// <summary>The entry shown for this device: itself, or the better connection to the same mouse.</summary>
+    private DeviceContext Shown(DeviceContext device)
+    {
+        var best = device;
+        foreach (var other in _devices)
+        {
+            if (other == device || other.Channel == device.Channel
+                || !SameDevice.Match(other.State, other.UnitId, device.State, device.UnitId))
+                continue;
+            var (rank, bestRank) = (SameDevice.Rank(other.State), SameDevice.Rank(best.State));
+            if (rank > bestRank || (rank == bestRank && _devices.IndexOf(other) < _devices.IndexOf(best)))
+                best = other;
+        }
+        return best;
+    }
 
     public override void Refresh()
     {
@@ -298,6 +317,19 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
         device.ReprogFeatureIndex = d.GetFeatureIndex(FeatureId.ReprogControls);
         device.SmartShiftFeatureIndex = d.GetFeatureIndex(FeatureId.SmartShiftEnhanced) ?? d.GetFeatureIndex(FeatureId.SmartShift);
 
+        if (device.UnitId == null && d.HasFeature(FeatureId.DeviceInfo))
+        {
+            // 0x0003 function 0 = getDeviceInfo -> [entity count, unit ID (4 bytes), ...]. The unit ID is
+            // the same over every connection, so it tells when the cable and the receiver lead to one mouse.
+            try
+            {
+                var info = d.Call(FeatureId.DeviceInfo, 0);
+                if (info.Length >= 5 && info.Skip(1).Take(4).Any(b => b != 0))
+                    device.UnitId = Convert.ToHexString(info, 1, 4);
+            }
+            catch (HidppErrorException) { }
+        }
+
         var name = device.State.Name;
         var kind = device.State.Kind;
         if (d.HasFeature(FeatureId.DeviceName))
@@ -441,7 +473,13 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
         var state = device.State with { Awake = true, Dpi = dpi, DpiSlots = slots, ActiveDpiSlot = activeSlot, Mode = mode };
         Update(device, state);
         if (raiseEvent && old is { } before && before != dpi && !device.SuppressNextDpiEvent)
-            Host.RaiseDpiChanged(state, before, dpi);
+        {
+            // The same press can arrive over both connections: let the shown one decide, so it pops up once.
+            if (Shown(device) is var shown && shown != device)
+                Try(shown, () => RefreshDpi(shown, raiseEvent: true));
+            else
+                Host.RaiseDpiChanged(state, before, dpi);
+        }
         device.SuppressNextDpiEvent = false;
     }
 
@@ -611,7 +649,10 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
             report.AppendLine($"== {c.ProductName} (PID {c.ProductId:X4}{(c.IsBluetooth ? ", Bluetooth" : "")}) ==");
             report.AppendLine(c.DevicePath);
             foreach (var device in _devices.Where(d => d.Channel == channel))
+            {
+                device.Hidden = Shown(device) != device;
                 DescribeDevice(device, report);
+            }
         }
     }
 
@@ -619,7 +660,8 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
     {
         var d = device.Device;
         report.AppendLine();
-        report.AppendLine($"-- {device.State.Name}: index 0x{d.DeviceIndex:X2}, {d.Connection}, HID++ {d.ProtocolVersion}, {(device.State.Awake ? "awake" : "asleep")} --");
+        report.AppendLine($"-- {device.State.Name}: index 0x{d.DeviceIndex:X2}, {d.Connection}, HID++ {d.ProtocolVersion}, {(device.State.Awake ? "awake" : "asleep")}" +
+            $"{(device.UnitId != null ? $", unit {device.UnitId}" : "")}{(device.Hidden ? ", hidden (also connected another way)" : "")} --");
         void Section(string title, Action write)
         {
             try { write(); }
@@ -667,6 +709,12 @@ internal sealed class LogitechProvider(IDeviceHost host) : DeviceProvider(host)
         public byte? ReprogFeatureIndex { get; set; }
         public byte? SmartShiftFeatureIndex { get; set; }
         public List<LogitechDevice.ControlInfo>? Controls { get; set; }
+
+        /// <summary>The serial-like unit ID from feature 0x0003, the same over the cable and the receiver.</summary>
+        public string? UnitId { get; set; }
+
+        /// <summary>For the diagnostic report: another connection to the same mouse is shown instead.</summary>
+        public bool Hidden { get; set; }
         public HashSet<int> PressedControls { get; set; } = new();
 
         /// <summary>The device (re)connected, so the settings it forgot need setting again.</summary>

@@ -55,6 +55,7 @@ public static class FeatureId
 {
     public const ushort Root = 0x0000;
     public const ushort FeatureSet = 0x0001;
+    public const ushort DeviceInfo = 0x0003;
     public const ushort DeviceName = 0x0005;
     public const ushort BatteryStatus = 0x1000;
     public const ushort BatteryVoltage = 0x1001;
