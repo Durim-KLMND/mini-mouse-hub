@@ -113,7 +113,7 @@ public sealed class TrayIcon : IDisposable
                 null => Color.FromArgb(0x5F, 0x62, 0x5F),
                 <= 10 => Color.FromArgb(0xB4, 0x23, 0x18),
                 <= 20 => Color.FromArgb(0xB4, 0x53, 0x09),
-                _ => charging ? Color.FromArgb(0x00, 0x4B, 0x4A) : Color.FromArgb(0x15, 0x80, 0x3D),
+                _ => charging ? Color.FromArgb(0x48, 0x69, 0x60) : Color.FromArgb(0x15, 0x80, 0x3D),
             };
             using var background = new SolidBrush(color);
             using var path = RoundedRect(new RectangleF(1, 1, 30, 30), 7);
