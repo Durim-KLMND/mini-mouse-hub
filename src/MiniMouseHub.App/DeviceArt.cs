@@ -57,7 +57,7 @@ public static class DeviceArt
 
     private static Brush EdgeBrush => new SolidColorBrush(Color.FromRgb(0x5A, 0x5A, 0x57));
 
-    private static Brush AccentBrush => new SolidColorBrush(Color.FromRgb(0x5C, 0xBD, 0xB4));
+    private static Brush AccentBrush => new SolidColorBrush(Color.FromRgb(0x8F, 0xBF, 0xB1));
 
     private static Canvas Mouse()
     {

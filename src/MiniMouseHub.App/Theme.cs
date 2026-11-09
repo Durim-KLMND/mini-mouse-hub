@@ -7,8 +7,8 @@ namespace MiniMouseHub.App;
 public enum ThemeChoice { System, Light, Dark }
 
 /// <summary>
-/// The app's colors, matching Novero Mail: warm greys with a deep teal accent, light by default
-/// and dark when Windows (or the user) asks for it. Brushes are swapped in the application
+/// The app's colors: warm greys with the deep green brand accent (#1D3D37, with #33554D and
+/// #486960 for hover and pressed), light by default and dark when Windows (or the user) asks for it. Brushes are swapped in the application
 /// resources, so XAML that uses DynamicResource updates by itself.
 /// </summary>
 public static class Theme
@@ -19,13 +19,15 @@ public static class Theme
         ["Surface"] = "#F6F6F5",
         ["Chrome"] = "#F6F6F5",
         ["Hover"] = "#ECECEA",
-        ["Selected"] = "#E1EEEC",
+        ["Selected"] = "#E4ECE9",
         ["Border"] = "#E2E2DF",
         ["Text"] = "#1A1A19",
         ["Muted"] = "#5F625F",
-        ["Accent"] = "#004B4A",
+        ["Accent"] = "#1D3D37",
+        ["AccentHover"] = "#33554D",
+        ["AccentPressed"] = "#486960",
         ["AccentText"] = "#FFFFFF",
-        ["AccentInk"] = "#004B4A",
+        ["AccentInk"] = "#1D3D37",
         ["Good"] = "#15803D",
         ["Warn"] = "#B45309",
         ["Bad"] = "#B42318",
@@ -38,13 +40,15 @@ public static class Theme
         ["Surface"] = "#181817",
         ["Chrome"] = "#181817",
         ["Hover"] = "#232322",
-        ["Selected"] = "#0F2E2D",
+        ["Selected"] = "#1D3D37",
         ["Border"] = "#2B2B29",
         ["Text"] = "#ECECEA",
         ["Muted"] = "#A3A39E",
-        ["Accent"] = "#004B4A",
+        ["Accent"] = "#1D3D37",
+        ["AccentHover"] = "#33554D",
+        ["AccentPressed"] = "#486960",
         ["AccentText"] = "#FFFFFF",
-        ["AccentInk"] = "#5CBDB4",
+        ["AccentInk"] = "#8FBFB1",
         ["Good"] = "#22A35A",
         ["Warn"] = "#E0A23B",
         ["Bad"] = "#F28B82",
